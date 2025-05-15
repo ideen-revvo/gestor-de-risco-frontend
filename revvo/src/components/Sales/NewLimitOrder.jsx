@@ -576,85 +576,36 @@ const NewLimitOrder = ({ initialData, onClose }) => {
         setCustomerDetails(null);
         return;
       }
-      const { data, error } = await supabase
-        .from('customer')
-        .select('id, name, company_code, costumer_email, costumer_phone, costumer_cnpj, costumer_razao_social, address:addr_id(*)')
-        .eq('id', selectedCustomer.id)
-        .single();
-      if (!error && data) {
-        let addressString = '';
-        if (data.address && !Array.isArray(data.address)) {
-          const addr = data.address;
-          addressString = `${addr.street || ''}, ${addr.number || ''} - ${addr.city || ''} - ${addr.state || ''}`;
+      
+      try {
+        const { getCustomerById } = await import('../../lib/customerApi');
+        const data = await getCustomerById(selectedCustomer.id);
+        
+        if (data) {
+          // Since the API might not return the same fields, we set defaults
+          setCustomerDetails({
+            ...data,
+            address: data.address || '',
+            costumer_email: data.costumer_email || '',
+            costumer_phone: data.costumer_phone || '',
+            costumer_cnpj: data.costumer_cnpj || '',
+            costumer_razao_social: data.costumer_razao_social || ''
+          });
         }
-        setCustomerDetails({
-          ...data,
-          address: addressString,
-        });
+      } catch (error) {
+        console.error('Error fetching customer details:', error);
+        setCustomerDetails(null);
       }
     }
     fetchCustomerDetails();
   }, [selectedCustomer]);
-
   // Buscar clientes do corporate_group do usuário logado
   useEffect(() => {
     async function fetchCustomersFromCorporateGroup() {
       try {
-        // Obter a sessão atual do usuário
-        const { data: { session } } = await supabase.auth.getSession();
+        const { fetchCustomers } = await import('../../lib/customerApi');
+        const customersData = await fetchCustomers();
         
-        if (!session || !session.user) return;
-        
-        // Buscar o perfil do usuário para obter a company_id associada
-        const { data: userProfileData, error: userProfileError } = await supabase
-          .from('user_profile')
-          .select('company_id')
-          .eq('logged_id', session.user.id)
-          .single();
-          
-        if (userProfileError || !userProfileData?.company_id) {
-          console.error('Erro ao buscar perfil do usuário ou company_id não encontrado:', userProfileError);
-          return;
-        }
-        
-        const userCompanyId = userProfileData.company_id;
-        
-        // 1. Buscar o corporate_group_id da company do usuário
-        const { data: companyData, error: companyError } = await supabase
-          .from('company')
-          .select('corporate_group_id')
-          .eq('id', userCompanyId)
-          .single();
-          
-        if (companyError || !companyData?.corporate_group_id) {
-          console.error('Erro ao buscar corporate_group_id:', companyError);
-          return;
-        }
-
-        // 2. Buscar todas as companies desse corporate_group
-        const { data: companiesData, error: companiesError } = await supabase
-          .from('company')
-          .select('id')
-          .eq('corporate_group_id', companyData.corporate_group_id);
-          
-        if (companiesError || !companiesData?.length) {
-          console.error('Erro ao buscar companies do grupo:', companiesError);
-          return;
-        }
-        
-        const companyIds = companiesData.map((c) => c.id);
-
-        // 3. Buscar todos os customers dessas companies
-        const { data: customersData, error: customersError } = await supabase
-          .from('customer')
-          .select('id, name, company_code')
-          .in('company_id', companyIds);
-          
-        if (customersError || !customersData) {
-          console.error('Erro ao buscar customers:', customersError);
-          return;
-        }
-
         setCustomerOptions(
           customersData.map((customer) => ({
             value: customer.id,

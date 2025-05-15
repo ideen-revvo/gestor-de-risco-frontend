@@ -863,71 +863,14 @@ const BusinessAnalysis = () => {
       setShowApprovalModal(true);
     }
   };
-
   useEffect(() => {
     async function loadCustomers() {
       try {
-        // Obter a sessão atual do usuário
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (!session || !session.user) {
-          console.error('Usuário não autenticado');
-          return;
-        }
-        
-        // Buscar o perfil do usuário para obter a company_id associada
-        const { data: userProfileData, error: userProfileError } = await supabase
-          .from('user_profile')
-          .select('company_id')
-          .eq('logged_id', session.user.id)
-          .single();
-          
-        if (userProfileError || !userProfileData?.company_id) {
-          console.error('Erro ao buscar perfil do usuário ou company_id não encontrado:', userProfileError);
-          return;
-        }
-        
-        const userCompanyId = userProfileData.company_id;
-        setUserCompanyId(userCompanyId); // Salva o company_id para uso em outras funções
-        
-        // Buscar o corporate_group_id da company do usuário
-        const { data: companyData, error: companyError } = await supabase
-          .from('company')
-          .select('corporate_group_id')
-          .eq('id', userCompanyId)
-          .single();
-
-        if (companyError || !companyData?.corporate_group_id) {
-          console.error('Erro ao buscar corporate_group_id:', companyError);
-          return;
-        }
-
-        // Buscar todas as companies desse corporate_group
-        const { data: companiesData, error: companiesError } = await supabase
-          .from('company')
-          .select('id')
-          .eq('corporate_group_id', companyData.corporate_group_id);
-
-        if (companiesError || !companiesData?.length) {
-          console.error('Erro ao buscar companies do corporate group:', companiesError);
-          return;
-        }
-          
-        const companyIds = companiesData.map(c => c.id);
-        
-        // Buscar todos os clientes associados a essas companies
-        const { data: customersData, error: customersError } = await supabase
-          .from('customer')
-          .select('id, name, company_code')
-          .in('company_id', companyIds)
-          .order('name');
-
-        if (customersError) {
-          console.error('Erro ao buscar customers:', customersError);
-          return;
-        }
+        const { fetchCustomers } = await import('../../lib/customerApi');
+        const customersData = await fetchCustomers();
         
         setCustomers(customersData || []);
+        setUserCompanyId(getGlobalCompanyId()); // Salva o company_id para uso em outras funções
       } catch (error) {
         console.error('Erro ao carregar clientes:', error);
       }

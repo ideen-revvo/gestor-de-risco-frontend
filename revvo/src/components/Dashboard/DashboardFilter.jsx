@@ -173,33 +173,19 @@ const DashboardFilter = ({ selectedCustomer }) => {
     async function fetchCustomerDetails() {
       if (selectedCustomer) {
         try {
-          const { data, error } = await supabase
-            .from('customer')
-            .select(`
-              id,
-              name,
-              company_code,
-              company:company_id (
-                id,
-                name
-              )
-            `)
-            .eq('id', selectedCustomer)
-            .single();
-            
-          if (error) throw error;
-          
-          if (data) {
+          const { getCustomerById } = await import('../../lib/customerApi');
+          const data = await getCustomerById(selectedCustomer);
+            if (data) {
             setCustomerDetails({
               id: data.id,
               name: data.name,
-              companyName: data.company?.name,
+              companyName: data.company?.name || '',
               companyCode: data.company_code,
-              cnpj: "12.345.678/0001-90",
-              address: "Av. Paulista, 1000 - Bela Vista",
-              city: "São Paulo - SP, 01310-100",
+              cnpj: data.costumer_cnpj || "12.345.678/0001-90",
+              address: data.address || "Av. Paulista, 1000 - Bela Vista",
+              city: data.city || "São Paulo - SP, 01310-100",
               contacts: [
-                { name: "Maria Silva", phone: "(11) 98765-4321", email: "maria.silva@bellavita.com.br" },
+                { name: "Maria Silva", phone: data.costumer_phone || "(11) 98765-4321", email: data.costumer_email || "maria.silva@bellavita.com.br" },
                 { name: "João Santos", phone: "(11) 98765-4322", email: "joao.santos@bellavita.com.br" },
                 { name: "Ana Oliveira", phone: "(11) 98765-4323", email: "ana.oliveira@bellavita.com.br" }
               ]

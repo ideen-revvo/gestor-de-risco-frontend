@@ -8,6 +8,7 @@ import { format, subMonths, parseISO } from 'date-fns';
 import UserProfile from './components/UserProfile/UserProfile';
 import CompanyProfile from './components/CompanyProfile/CompanyProfile';
 import DebugPanel from './components/DebugPanel/DebugPanel';
+import { ApiTestPanel } from './components/DebugPanel';
 
 // Auth Components
 import Login from './components/auth/Login';
@@ -254,17 +255,12 @@ function App() {
       Classificacao: "BAIXO RISCO"
     }
   };
-
   // Hooks para carregar os dados
   useEffect(() => {
     async function loadCustomers() {
       try {
-        const { data, error } = await supabase
-          .from('customer')
-          .select('id, name')
-          .order('name', { ascending: true });
-
-        if (error) throw error;
+        const { fetchCustomers } = await import('./lib/customerApi');
+        const data = await fetchCustomers();
         setCustomers(data || []);
       } catch (error) {
         console.error('Error loading customers:', error);
@@ -617,7 +613,15 @@ function App() {
       ) : (
         <SalesOrders />
       )}
-    </Layout>
+    </Layout>        </ProtectedRoute>
+      } />
+
+      {/* API Test Panel Route */}
+      <Route path="/api-test" element={
+        <ProtectedRoute>
+          <Layout>
+            <ApiTestPanel />
+          </Layout>
         </ProtectedRoute>
       } />
 

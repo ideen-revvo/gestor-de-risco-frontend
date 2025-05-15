@@ -374,45 +374,20 @@ function SalesOrders() {
   const [filterBranch, setFilterBranch] = useState('')
   const [filterStartDate, setFilterStartDate] = useState('')
   const [filterEndDate, setFilterEndDate] = useState('')
-
   useEffect(() => {
     async function loadCustomers() {
       try {
-        const companyId = getGlobalCompanyId();
-        if (!companyId) return;
+        const { fetchCustomers } = await import('./lib/customerApi');
+        const customersData = await fetchCustomers();
         
-        const { data: companyData } = await supabase
-          .from('company')
-          .select('corporate_group_id')
-          .eq('id', companyId)
-          .single();
-
-        if (companyData?.corporate_group_id) {
-          const { data: companiesData } = await supabase
-            .from('company')
-            .select('id')
-            .eq('corporate_group_id', companyData.corporate_group_id);
-
-          if (companiesData?.length > 0) {
-            const companyIds = companiesData.map(c => c.id);
-            
-            const { data: customersData, error } = await supabase
-              .from('customer')
-              .select('id, name, company_code')
-              .in('company_id', companyIds)
-              .order('name');
-
-            if (error) throw error;
-            setCustomers(customersData || []);
-            
-            const options = customersData?.map(customer => ({
-              value: customer.id,
-              label: customer.company_code ? `${customer.company_code} - ${customer.name}` : customer.name
-            })) || [];
-            
-            setCustomerOptions(options);
-          }
-        }
+        setCustomers(customersData || []);
+        
+        const options = customersData?.map(customer => ({
+          value: customer.id,
+          label: customer.company_code ? `${customer.company_code} - ${customer.name}` : customer.name
+        })) || [];
+        
+        setCustomerOptions(options);
       } catch (error) {
         console.error('Error loading customers:', error);
       }

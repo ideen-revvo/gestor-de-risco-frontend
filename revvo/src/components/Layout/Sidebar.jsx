@@ -155,12 +155,11 @@ const Sidebar = ({
   };
 
   return (
-    <>
-      <MenuButton onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
+    <>      <MenuButton onClick={() => setIsSidebarOpen(!isSidebarOpen)}>
         <List size={24} />
       </MenuButton>
       
-      <SidebarContainer data-isopen={isSidebarOpen.toString()}>
+      <SidebarContainer data-isopen={(isSidebarOpen || false).toString()}>
         <h3>Menu</h3>
         <ul style={{ marginTop: '16px' }}>
           <li 
@@ -208,13 +207,19 @@ const Sidebar = ({
           </li>
         </ul>
 
-        <ul>
-          <li 
+        <ul>          <li 
             className={currentPage === 'analise' ? 'active' : ''}
             onClick={() => setCurrentPage('analise')}
           >
             <Eye size={16} weight="regular" />
             Risco Cliente
+          </li>
+          {/* API Test Panel link */}
+          <li 
+            onClick={() => navigate('/api-test')}
+          >
+            <ChartLine size={16} weight="regular" />
+            API Customers Test
           </li>
           <li onClick={() => setIsConfigOpen(!isConfigOpen)} style={{ cursor: 'pointer' }}>
             <Gear size={16} weight="regular" />
