@@ -430,6 +430,7 @@ function parsePhone(formatted) {
 const NewLimitOrder = ({ initialData, onClose }) => {
   const [selectedCustomer, setSelectedCustomer] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [showSuccessMessage, setShowSuccessMessage] = useState(false);
   const [formData, setFormData] = useState({
     classification: '',
     branch: '',
@@ -438,7 +439,9 @@ const NewLimitOrder = ({ initialData, onClose }) => {
     paymentMethod: '',
     paymentTerm: '',
     creditLimitAmt: '',
-    observation: ''
+    observation: '',
+    nf_fisica: false,
+    prazo_envio_oc: ''
   });
   const [userProfile, setUserProfile] = useState(null);
   const [customerDetails, setCustomerDetails] = useState(null);
@@ -461,7 +464,9 @@ const NewLimitOrder = ({ initialData, onClose }) => {
         paymentMethod: initialData.silim_meio_pgto_id?.toString() || '',
         paymentTerm: initialData.paymt_term || '',
         creditLimitAmt: initialData.credit_limit_amt ? (initialData.credit_limit_amt * 100).toString() : '',
-        observation: initialData.comment || ''
+        observation: initialData.comment || '',
+        nf_fisica: initialData.nf_fisica || false,
+        prazo_envio_oc: initialData.prazo_envio_oc || ''
       });
 
       if (initialData.customer_id) {
@@ -500,7 +505,9 @@ const NewLimitOrder = ({ initialData, onClose }) => {
       cust_sap_id: customerDetails?.company_code || null,
       comment: formData.observation || null,
       credit_limit_amt: formData.creditLimitAmt ? Number(formData.creditLimitAmt) / 100 : null,
-      status_id: 1
+      status_id: 1,
+      nf_fisica: formData.nf_fisica,
+      prazo_envio_oc: formData.prazo_envio_oc || null
     };
 
     const { error } = initialData 
@@ -514,10 +521,13 @@ const NewLimitOrder = ({ initialData, onClose }) => {
 
     setLoading(false);
     if (!error) {
-      if (onClose) {
-        onClose();
-        window.dispatchEvent(new CustomEvent('navigateToMyRequests'));
-      }
+      setShowSuccessMessage(true);
+      setTimeout(() => {
+        if (onClose) {
+          onClose();
+          window.dispatchEvent(new CustomEvent('navigateToMyRequests'));
+        }
+      }, 2000);
     } else {
       alert(initialData ? 'Erro ao atualizar solicitação!' : 'Erro ao enviar solicitação!');
     }
@@ -900,6 +910,33 @@ const NewLimitOrder = ({ initialData, onClose }) => {
                 placeholder="R$ 0,00"
               />
             </FormGroup>
+
+            <FormGroup>
+              <label>Recebimento de NF Física</label>
+              <StyledSelect
+                name="nf_fisica"
+                value={formData.nf_fisica ? 'true' : 'false'}
+                onChange={(e) => setFormData(prev => ({ ...prev, nf_fisica: e.target.value === 'true' }))}
+              >
+                <option value="true">Sim</option>
+                <option value="false">Não</option>
+              </StyledSelect>
+            </FormGroup>
+          </div>
+        </FormSection>
+
+        <FormSection>
+          <div className="grid grid-cols-2 gap-4">
+            <FormGroup>
+              <label>Prazo para Envio da OC</label>
+              <input
+                type="text"
+                name="prazo_envio_oc"
+                value={formData.prazo_envio_oc}
+                onChange={(e) => setFormData(prev => ({ ...prev, prazo_envio_oc: e.target.value }))}
+                placeholder="Ex: 30 dias"
+              />
+            </FormGroup>
           </div>
         </FormSection>
 
@@ -975,6 +1012,43 @@ const NewLimitOrder = ({ initialData, onClose }) => {
               >
                 {deleteLoading ? 'Excluindo...' : 'Excluir'}
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Mensagem de sucesso */}
+      {showSuccessMessage && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.25)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 9999
+        }}>
+          <div style={{ 
+            background: 'white', 
+            borderRadius: 8, 
+            padding: 32, 
+            minWidth: 320, 
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            textAlign: 'center'
+          }}>
+            <div style={{ 
+              fontWeight: 600, 
+              fontSize: 18, 
+              marginBottom: 16,
+              color: 'var(--success, #059669)'
+            }}>
+              {initialData ? 'Solicitação atualizada com sucesso!' : 'Solicitação enviada com sucesso!'}
+            </div>
+            <div style={{ color: 'var(--secondary-text)' }}>
+              Redirecionando...
             </div>
           </div>
         </div>
