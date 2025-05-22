@@ -228,11 +228,37 @@ const FinancialAnalysisContainer = styled.div`
   height: 100%;
   display: flex;
   flex-direction: column;
+  position: relative;
   
   h4 {
     margin-bottom: 16px;
     font-weight: 500;
     color: black;
+  }
+  
+  .load-calculated-limit {
+    position: absolute;
+    top: 24px;
+    right: 24px;
+    padding: 6px 12px;
+    background: var(--primary-blue);
+    color: white;
+    border: none;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    
+    &:hover {
+      background: #2563EB;
+    }
+    
+    &:disabled {
+      background: #93C5FD;
+      cursor: not-allowed;
+    }
   }
   
   .form-group {
@@ -507,6 +533,7 @@ const DashboardOrders = ({
   const [uploadedFiles, setUploadedFiles] = React.useState([]);
   const [customerDetails, setCustomerDetails] = React.useState(null);
   const [userCompanyId, setUserCompanyId] = React.useState(null);
+  const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
   
   // Format currency input
   const formatCurrency = (value) => {
@@ -677,6 +704,48 @@ const DashboardOrders = ({
         setUploading(false);
       }
     };
+
+  // Add this new function to load the calculated limit
+  const handleLoadCalculatedLimit = async () => {
+    if (!selectedDetailCard?.customer_id) return;
+    
+    setLoadingCalculatedLimit(true);
+    try {
+      // First get the customer's credit_limits_id
+      const { data: customerData, error: customerError } = await supabase
+        .from('customer')
+        .select('credit_limits_id')
+        .eq('id', selectedDetailCard.customer_id)
+        .single();
+      
+      if (customerError) throw customerError;
+      
+      if (customerData?.credit_limits_id) {
+        // Then get the calculated limit
+        const { data: creditLimitData, error: creditLimitError } = await supabase
+          .from('credit_limit_amount')
+          .select('credit_limit_calc')
+          .eq('id', customerData.credit_limits_id)
+          .single();
+          
+        if (creditLimitError) throw creditLimitError;
+        
+        if (creditLimitData?.credit_limit_calc) {
+          // Format and set the calculated limit
+          const formattedLimit = creditLimitData.credit_limit_calc.toLocaleString('pt-BR', {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+          });
+          setCreditLimit(formattedLimit);
+        }
+      }
+    } catch (error) {
+      console.error('Error loading calculated limit:', error);
+      toast.error('Erro ao carregar limite calculado');
+    } finally {
+      setLoadingCalculatedLimit(false);
+    }
+  };
 
   return (
     <>
@@ -1173,6 +1242,30 @@ const DashboardOrders = ({
         </CustomerHistory>
         <FinancialAnalysisContainer>
           <h4>Análise Financeira</h4>
+          <button 
+            className="load-calculated-limit"
+            onClick={handleLoadCalculatedLimit}
+            disabled={loadingCalculatedLimit || !selectedDetailCard?.customer_id}
+          >
+            {loadingCalculatedLimit ? (
+              <>
+                <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Carregando...
+              </>
+            ) : (
+              <>
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                  <polyline points="7 10 12 15 17 10"></polyline>
+                  <line x1="12" y1="15" x2="12" y2="3"></line>
+                </svg>
+                Carregar limite calculado
+              </>
+            )}
+          </button>
           
           <div className="form-group">
             <label htmlFor="creditLimit">Limite de Crédito a Conceder</label>
