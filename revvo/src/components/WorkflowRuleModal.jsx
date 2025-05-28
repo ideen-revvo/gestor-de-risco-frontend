@@ -1,20 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 const WorkflowRuleModal = ({ isOpen, onClose, onSave }) => {
   const [loading, setLoading] = useState(false);
-  const [roles] = useState([
-    { id: 1, name: 'Papel 1' },
-    { id: 2, name: 'Papel 2' },
-    { id: 3, name: 'Papel 3' },
-    { id: 4, name: 'Papel 4' }
-  ]);
+  const [roles, setRoles] = useState([]);
+  const [workflowTypes, setWorkflowTypes] = useState([]);
 
   const initialFormData = {
     nome: '',
     descriptions: '',
     amt_1: [0, 0],
-    role_id: []
+    amt_2: [0, 0],
+    role_id: [],
+    type_id: null
   };
 
   const [formData, setFormData] = useState(initialFormData);
@@ -22,10 +21,40 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave }) => {
 
   useEffect(() => {
     if (isOpen) {
+      loadRoles();
+      loadWorkflowTypes();
       setIsEditing(true);
       setFormData(initialFormData);
     }
   }, [isOpen]);
+
+  const loadRoles = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('user_role')
+        .select('id, name')
+        .order('name');
+
+      if (error) throw error;
+      setRoles(data || []);
+    } catch (error) {
+      console.error('Error loading roles:', error);
+    }
+  };
+
+  const loadWorkflowTypes = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('workflow_type')
+        .select('id, name')
+        .order('name');
+
+      if (error) throw error;
+      setWorkflowTypes(data || []);
+    } catch (error) {
+      console.error('Error loading workflow types:', error);
+    }
+  };
 
   const formatCurrency = (value) => {
     return new Intl.NumberFormat('pt-BR', {
@@ -68,146 +97,117 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave }) => {
           </button>
         </div>
 
-        <div className="px-6 py-4">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Nome da Regra
-              </label>
-              <input
-                type="text"
-                value={formData.nome}
-                onChange={(e) => setFormData(prev => ({ ...prev, nome: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-5 focus:ring-blue-500 focus:border-blue-500"
-                required
-                placeholder="Ex: Aprovação até 100k"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">
-                Descrição
-              </label>
-              <textarea
-                value={formData.descriptions || ''}
-                onChange={(e) => setFormData(prev => ({ ...prev, descriptions: e.target.value }))} 
-                className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 focus:ring-blue-500 focus:border-blue-500"
-                rows={3}
-                placeholder="Descreva o fluxo de aprovação..."
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  Valor Mínimo de Pagamento
+        <div className="p-6">
+          <form onSubmit={handleSubmit}>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Nome
                 </label>
-                <div className="relative rounded-md">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-gray-500 sm:text-sm">R$</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={formatCurrency(formData.amt_1[0])}
-                    onChange={(e) => {
-                      const value = parseCurrency(e.target.value);
-                      setFormData(prev => ({
-                        ...prev,
-                        amt_1: [value, prev.amt_1[1]]
-                      }));
-                    }}
-                    className="block w-full pl-8 pr-3 py-4 rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                    placeholder="0,00"
-                  />
-                </div>
+                <input
+                  type="text"
+                  value={formData.nome}
+                  onChange={(e) => setFormData({ ...formData, nome: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
+                />
               </div>
-              <div className="space-y-1">
-                <label className="block text-sm font-medium text-gray-700">
-                  Valor Máximo de Pagamento
-                </label>
-                <div className="relative rounded-md">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <span className="text-gray-500 sm:text-sm">R$</span>
-                  </div>
-                  <input
-                    type="text"
-                    value={formatCurrency(formData.amt_1[1])}
-                    onChange={(e) => {
-                      const value = parseCurrency(e.target.value);
-                      setFormData(prev => ({
-                        ...prev,
-                        amt_1: [prev.amt_1[0], value]
-                      }));
-                    }}
-                    className="block w-full pl-8 pr-3 py-4 rounded-md border border-gray-300 focus:ring-blue-500 focus:border-blue-500"
-                    required
-                    placeholder="0,00"
-                  />
-                </div>
-              </div>
-            </div>
 
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <h4 className="text-sm font-medium text-gray-900">Papéis de Aprovação</h4>
-                <button 
-                  type="button"
-                  onClick={() => setFormData(prev => ({
-                    ...prev,
-                    role_id: [...(prev.role_id || []), ""]
-                  }))}
-                  className="inline-flex items-center gap-1 text-sm font-medium text-blue-600 hover:text-blue-700"
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Descrição
+                </label>
+                <textarea
+                  value={formData.descriptions}
+                  onChange={(e) => setFormData({ ...formData, descriptions: e.target.value })}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  rows={3}
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Tipo de Workflow
+                </label>
+                <select
+                  value={formData.type_id || ''}
+                  onChange={(e) => setFormData({ ...formData, type_id: Number(e.target.value) })}
+                  className="w-full px-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  required
                 >
-                  <Plus className="w-4 h-4" />
-                  Adicionar Papel
-                </button>
+                  <option value="">Selecione um tipo</option>
+                  {workflowTypes.map((type) => (
+                    <option key={type.id} value={type.id}>
+                      {type.name}
+                    </option>
+                  ))}
+                </select>
               </div>
 
-              <div className="space-y-4">
-                {formData.role_id.map((roleId, index) => (
-                  <div key={index} className="flex items-start gap-4">
-                    <div className="flex-1">
-                      <div>
-                        <select
-                          value={roleId}
-                          onChange={(e) => {
-                            const newRoleIds = [...formData.role_id];
-                            newRoleIds[index] = Number(e.target.value);
-                            setFormData(prev => ({ ...prev, role_id: newRoleIds }));
-                          }}
-                          className="block w-full rounded-md border border-gray-300 px-3 py-0 focus:ring-blue-500 focus:border-blue-500 text-base"
-                          required
-                        >
-                          <option value="" disabled>Selecione um papel</option>
-                          {roles.map(role => (
-                            <option key={role.id} value={role.id}>
-                              {role.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    {formData.role_id.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          const newRoleIds = [...formData.role_id];
-                          newRoleIds.splice(index, 1);
-                          setFormData(prev => ({ ...prev, role_id: newRoleIds }));
-                        }}
-                        className="mt-8 text-gray-400 hover:text-gray-500"
-                      >
-                        <Trash2 className="w-5 h-5" />
-                      </button>
-                    )}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Faixa de Valores
+                </label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <input
+                      type="text"
+                      value={formatCurrency(formData.amt_1[0])}
+                      onChange={(e) => {
+                        const value = parseCurrency(e.target.value);
+                        setFormData({
+                          ...formData,
+                          amt_1: [value, formData.amt_1[1]]
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Valor mínimo"
+                    />
                   </div>
-                ))}
+                  <div>
+                    <input
+                      type="text"
+                      value={formatCurrency(formData.amt_1[1])}
+                      onChange={(e) => {
+                        const value = parseCurrency(e.target.value);
+                        setFormData({
+                          ...formData,
+                          amt_1: [formData.amt_1[0], value]
+                        });
+                      }}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="Valor máximo"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Papéis
+                </label>
+                <div className="space-y-2">
+                  {roles.map((role) => (
+                    <label key={role.id} className="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        checked={formData.role_id.includes(role.id)}
+                        onChange={(e) => {
+                          const newRoles = e.target.checked
+                            ? [...formData.role_id, role.id]
+                            : formData.role_id.filter((id) => id !== role.id);
+                          setFormData({ ...formData, role_id: newRoles });
+                        }}
+                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">{role.name}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             </div>
             
-            <div className="flex items-center justify-between pt-4 border-t">
+            <div className="flex items-center justify-between pt-4 border-t mt-6">
               <div className="flex gap-3 w-full justify-end">
                 <button
                   type="button"

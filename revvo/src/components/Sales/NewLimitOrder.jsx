@@ -510,14 +510,44 @@ const NewLimitOrder = ({ initialData, onClose }) => {
       prazo_envio_oc: formData.prazo_envio_oc || null
     };
 
-    const { error } = initialData 
+    let saleOrderId;
+    const { data, error } = initialData 
       ? await supabase
           .from('credit_limit_request')
           .update(requestData)
           .eq('id', initialData.id)
+          .select()
       : await supabase
           .from('credit_limit_request')
-          .insert([requestData]);
+          .insert([requestData])
+          .select();
+
+    if (!error && data) {
+      saleOrderId = initialData ? initialData.id : data[0].id;
+      
+      // Create workflow record
+      const workflowData = {
+        company_Id: getGlobalCompanyId(),
+        sale_order_id: saleOrderId,
+        curent_step: 1, // Initial step
+        dt_sent: [new Date().toISOString()],
+        respons_role_id: [], // Will be populated by the workflow system
+        dt_decision: [],
+        respons_dec: [],
+        decision_id: []
+      };
+
+      const { error: workflowError } = await supabase
+        .from('workflow_sale_order')
+        .insert([workflowData]);
+
+      if (workflowError) {
+        console.error('Error creating workflow record:', workflowError);
+        alert('Erro ao criar registro de workflow!');
+        setLoading(false);
+        return;
+      }
+    }
 
     setLoading(false);
     if (!error) {
