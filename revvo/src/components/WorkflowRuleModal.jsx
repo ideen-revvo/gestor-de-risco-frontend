@@ -70,9 +70,10 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
   };
   // Função utilitária para formatar como moeda BRL
   function formatCurrency(value) {
-    // Convert to string if it's a number
-    const valueStr = String(value);
-    const num = Number(valueStr.replace(/[^\d]/g, '')) / 100;
+    // If the value is null or undefined, return empty string
+    if (value == null) return '';
+    // Ensure the value is treated as a number
+    const num = Number(value);
     if (isNaN(num)) return '';
     return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
@@ -83,14 +84,10 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
     // If the cleaned string is empty, return 0
     if (valueStr === '') return 0;
 
-    // Treat the last two digits as decimals
-    const integerPart = valueStr.slice(0, -2);
-    const decimalPart = valueStr.slice(-2);
+    // Convert the digit string to a number and treat the last two digits as decimals
+    const num = parseInt(valueStr, 10) / 100;
 
-    // Combine and convert to a floating-point number
-    const num = parseFloat(`${integerPart || '0'}.${decimalPart || '00'}`);
-
-    // Return 0 if the result is NaN (shouldn't happen with this logic, but as a safeguard)
+    // Return 0 if the result is NaN (shouldn't happen with valid digit strings)
     return isNaN(num) ? 0 : num;
   }
 
@@ -183,10 +180,12 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
                       type="text"
                       value={formatCurrency(formData.value_range[0])}
                       onChange={(e) => {
-                        const value = parseCurrency(e.target.value);
+                        const rawValue = e.target.value.replace(/[^\d]/g, '');
+                        // Treat the raw digits, assuming the last two are decimals
+                        const numValue = rawValue === '' ? 0 : parseInt(rawValue, 10) / 100;
                         setFormData({
                           ...formData,
-                          value_range: [value, formData.value_range[1]]
+                          value_range: [numValue, formData.value_range[1]]
                         });
                       }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -198,10 +197,12 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
                       type="text"
                       value={formatCurrency(formData.value_range[1])}
                       onChange={(e) => {
-                        const value = parseCurrency(e.target.value);
-                        setFormData({
+                         const rawValue = e.target.value.replace(/[^\d]/g, '');
+                         // Treat the raw digits, assuming the last two are decimals
+                         const numValue = rawValue === '' ? 0 : parseInt(rawValue, 10) / 100;
+                         setFormData({
                           ...formData,
-                          value_range: [formData.value_range[0], value]
+                          value_range: [formData.value_range[0], numValue]
                         });
                       }}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
