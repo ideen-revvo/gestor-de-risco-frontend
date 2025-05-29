@@ -68,17 +68,31 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
       console.error('Error loading workflow types:', error);
     }
   };
+  // Função utilitária para formatar como moeda BRL
+  function formatCurrency(value) {
+    // Convert to string if it's a number
+    const valueStr = String(value);
+    const num = Number(valueStr.replace(/[^\d]/g, '')) / 100;
+    if (isNaN(num)) return '';
+    return num.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  }
 
-  const formatCurrency = (value) => {
-    return new Intl.NumberFormat('pt-BR', {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
-  };
+  function parseCurrency(formatted) {
+    // Handle both string and number inputs and remove all non-digits
+    const valueStr = String(formatted).replace(/[^\d]/g, '');
+    // If the cleaned string is empty, return 0
+    if (valueStr === '') return 0;
 
-  const parseCurrency = (value) => {
-    return Number(value.replace(/[^\d,-]/g, '').replace(',', '.')) || 0;
-  };
+    // Treat the last two digits as decimals
+    const integerPart = valueStr.slice(0, -2);
+    const decimalPart = valueStr.slice(-2);
+
+    // Combine and convert to a floating-point number
+    const num = parseFloat(`${integerPart || '0'}.${decimalPart || '00'}`);
+
+    // Return 0 if the result is NaN (shouldn't happen with this logic, but as a safeguard)
+    return isNaN(num) ? 0 : num;
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
