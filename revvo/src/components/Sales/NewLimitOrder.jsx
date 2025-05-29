@@ -510,47 +510,99 @@ const NewLimitOrder = ({ initialData, onClose }) => {
       prazo_envio_oc: formData.prazo_envio_oc || null
     };
 
-    let saleOrderId;
-    const { data, error } = initialData 
-      ? await supabase
-          .from('credit_limit_request')
-          .update(requestData)
-          .eq('id', initialData.id)
-          .select()
-      : await supabase
-          .from('credit_limit_request')
-          .insert([requestData])
-          .select();
+    try {
+      let saleOrderId;
+      const { data, error } = initialData 
+        ? await supabase
+            .from('credit_limit_request')
+            .update(requestData)
+            .eq('id', initialData.id)
+            .select()
+        : await supabase
+            .from('credit_limit_request')
+            .insert([requestData])
+            .select();
 
-    if (!error && data) {
-      saleOrderId = initialData ? initialData.id : data[0].id;
+      if (error) throw error;
       
-      // Create workflow record
-      const workflowData = {
-        company_Id: getGlobalCompanyId(),
-        sale_order_id: saleOrderId,
-        curent_step: 1, // Initial step
-        dt_sent: [new Date().toISOString()],
-        respons_role_id: [], // Will be populated by the workflow system
-        dt_decision: [],
-        respons_dec: [],
-        decision_id: []
-      };
+      saleOrderId = initialData ? initialData.id : data[0].id;
 
-      const { error: workflowError } = await supabase
-        .from('workflow_sale_order')
-        .insert([workflowData]);
+      // Get workflow rules based on the credit limit amount
+      const { data: workflowRules, error: workflowRulesError } = await supabase
+        .from('workflow_rules')
+        .select('*')
+        .eq('company_id', getGlobalCompanyId())
+        .order('value_range', { ascending: true });
 
-      if (workflowError) {
-        console.error('Error creating workflow record:', workflowError);
-        alert('Erro ao criar registro de workflow!');
-        setLoading(false);
-        return;
+      if (workflowRulesError) throw workflowRulesError;
+
+      // Find the applicable workflow rule based on the credit limit amount
+      const applicableRule = workflowRules.find(rule => {
+        const [minValue, maxValue] = rule.value_range;
+        return requestData.credit_limit_amt >= minValue && requestData.credit_limit_amt <= maxValue;
+      });
+
+      if (!applicableRule) {
+        throw new Error('Nenhuma regra de workflow encontrada para o valor solicitado');
       }
-    }
 
-    setLoading(false);
-    if (!error) {
+      // Create workflow_sale_order record
+      const { data: workflowOrder, error: workflowOrderError } = await supabase
+        .from('workflow_sale_order')
+        .insert([{
+          credit_limit_req_id: saleOrderId
+        }])
+        .select()
+        .single();
+
+      if (workflowOrderError) throw workflowOrderError;
+
+      // Find all rules that have a lower value range than the applicable rule
+      const lowerRules = workflowRules.filter(rule => {
+        const [ruleMinValue] = rule.value_range;
+        const [applicableMinValue] = applicableRule.value_range;
+        return ruleMinValue < applicableMinValue;
+      });
+
+      // Sort lower rules by their minimum value to ensure correct step order
+      lowerRules.sort((a, b) => {
+        const [minA] = a.value_range;
+        const [minB] = b.value_range;
+        return minA - minB;
+      });
+
+      // Create workflow_details records for all required steps
+      const workflowDetails = [
+        // First add all lower level steps
+        ...lowerRules.map((rule, index) => ({
+          workflow_sale_order_id: workflowOrder.id,
+          workflow_step: index + 1,
+          jurisdiction_id: rule.role_id,
+          started_at: new Date().toISOString(),
+          approval: null,
+          approver: null,
+          parecer: null,
+          finished_at: null
+        })),
+        // Then add the final applicable rule step
+        {
+          workflow_sale_order_id: workflowOrder.id,
+          workflow_step: lowerRules.length + 1,
+          jurisdiction_id: applicableRule.role_id,
+          started_at: new Date().toISOString(),
+          approval: null,
+          approver: null,
+          parecer: null,
+          finished_at: null
+        }
+      ];
+
+      const { error: workflowDetailsError } = await supabase
+        .from('workflow_details')
+        .insert(workflowDetails);
+
+      if (workflowDetailsError) throw workflowDetailsError;
+
       setShowSuccessMessage(true);
       setTimeout(() => {
         if (onClose) {
@@ -558,8 +610,11 @@ const NewLimitOrder = ({ initialData, onClose }) => {
           window.dispatchEvent(new CustomEvent('navigateToMyRequests'));
         }
       }, 2000);
-    } else {
+    } catch (error) {
+      console.error('Error:', error);
       alert(initialData ? 'Erro ao atualizar solicitação!' : 'Erro ao enviar solicitação!');
+    } finally {
+      setLoading(false);
     }
   };
 
