@@ -534,6 +534,8 @@ const DashboardOrders = ({
   const [customerDetails, setCustomerDetails] = React.useState(null);
   const [userCompanyId, setUserCompanyId] = React.useState(null);
   const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
+  const [workflowData, setWorkflowData] = useState(null);
+  const [loadingWorkflow, setLoadingWorkflow] = useState(false);
   
   // Format currency input
   const formatCurrency = (value) => {
@@ -747,6 +749,57 @@ const DashboardOrders = ({
     }
   };
 
+  // Function to fetch workflow data
+  const fetchWorkflowData = async (creditLimitReqId) => {
+    if (!creditLimitReqId) return;
+    
+    setLoadingWorkflow(true);
+    try {
+      // First get the workflow_sale_order
+      const { data: workflowOrder, error: workflowOrderError } = await supabase
+        .from('workflow_sale_order')
+        .select('*')
+        .eq('credit_limit_req_id', creditLimitReqId)
+        .single();
+
+      if (workflowOrderError) throw workflowOrderError;
+
+      if (workflowOrder) {
+        // Then get the workflow details with jurisdiction information
+        const { data: workflowDetails, error: workflowDetailsError } = await supabase
+          .from('workflow_details')
+          .select(`
+            *,
+            jurisdiction:user_role (
+              name,
+              description
+            )
+          `)
+          .eq('workflow_sale_order_id', workflowOrder.id)
+          .order('workflow_step', { ascending: true });
+
+        if (workflowDetailsError) throw workflowDetailsError;
+
+        setWorkflowData({
+          order: workflowOrder,
+          details: workflowDetails
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching workflow data:', error);
+      toast.error('Erro ao carregar dados do workflow');
+    } finally {
+      setLoadingWorkflow(false);
+    }
+  };
+
+  // Effect to fetch workflow data when selectedDetailCard changes
+  React.useEffect(() => {
+    if (selectedDetailCard?.id) {
+      fetchWorkflowData(selectedDetailCard.id);
+    }
+  }, [selectedDetailCard]);
+
   return (
     <>
       <CaixaEntradaContainer>
@@ -842,89 +895,54 @@ const DashboardOrders = ({
                       display: 'flex', 
                       flexDirection: 'column', 
                       gap: '8px'}}>
-                    <div 
-                      onClick={() => setShowApprovedModal(true)}
-                      style={{ 
-                      padding: '8px', 
-                      background: 'white', 
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer'
-                    }}>
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: '500' }}>Analista financeiro</div>
-                        <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>Aprovado</div>
+                    {loadingWorkflow ? (
+                      <div style={{ textAlign: 'center', padding: '16px', color: 'var(--secondary-text)' }}>
+                        Carregando workflow...
                       </div>
-                      <div style={{ 
-                        width: '20px', 
-                        height: '20px', 
-                        borderRadius: '50%', 
-                        background: 'var(--success)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        <span style={{ color: 'white', fontSize: '10px' }}>✓</span>
+                    ) : workflowData?.details ? (
+                      workflowData.details.map((detail, index) => (
+                        <div 
+                          key={detail.id}
+                          onClick={() => detail.approval === null && setShowApprovalModal(true)}
+                          style={{ 
+                            padding: '8px', 
+                            background: 'white', 
+                            borderRadius: '4px',
+                            border: detail.approval === null ? '1px solid var(--primary-blue)' : '1px solid var(--border-color)',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            cursor: detail.approval === null ? 'pointer' : 'default'
+                          }}>
+                          <div>
+                            <div style={{ fontSize: '13px', fontWeight: '500' }}>{detail.jurisdiction?.name || 'N/A'}</div>
+                            <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                              {detail.approval === null ? 'Pendente' : 
+                               detail.approval ? 'Aprovado' : 'Rejeitado'}
+                            </div>
+                          </div>
+                          <div style={{ 
+                            width: '20px', 
+                            height: '20px', 
+                            borderRadius: '50%', 
+                            background: detail.approval === null ? 'var(--border-color)' :
+                                      detail.approval ? 'var(--success)' : '#DC2626',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}>
+                            <span style={{ color: 'white', fontSize: '10px' }}>
+                              {detail.approval === null ? '!' : 
+                               detail.approval ? '✓' : '✕'}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div style={{ textAlign: 'center', padding: '16px', color: 'var(--secondary-text)' }}>
+                        Nenhum workflow encontrado
                       </div>
-                    </div>
-                    
-                    <div 
-                      onClick={() => setShowApprovalModal(true)}
-                      style={{ 
-                      padding: '8px', 
-                      background: 'white', 
-                      borderRadius: '4px',
-                      border: '1px solid var(--primary-blue)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      cursor: 'pointer'
-                    }}>
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: '500' }}>Gerente financeiro</div>
-                        <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>Aprovado</div>
-                      </div>
-                      <div style={{ 
-                        width: '20px', 
-                        height: '20px', 
-                        borderRadius: '50%', 
-                        background: '#FCD34D',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        <span style={{ color: 'white', fontSize: '10px' }}>✓</span>
-                      </div>
-                    </div>
-                    
-                    <div style={{ 
-                      padding: '8px', 
-                      background: 'white', 
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center'
-                    }}>
-                      <div>
-                        <div style={{ fontSize: '13px', fontWeight: '500' }}>Diretor financeiro</div>
-                        <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>Pendente</div>
-                      </div>
-                      <div style={{ 
-                        width: '20px', 
-                        height: '20px', 
-                        borderRadius: '50%', 
-                        background: 'var(--border-color)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center'
-                      }}>
-                        <span style={{ color: 'white', fontSize: '10px' }}>!</span>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 </div>
               </RequestCard>
@@ -1416,9 +1434,50 @@ const DashboardOrders = ({
               </button>
               <button 
                 className="approve"
-                onClick={() => {
-                  setShowApprovalModal(false);
-                  setShowApprovedModal(true);
+                onClick={async () => {
+                  try {
+                    // Get the current workflow step
+                    const currentStep = workflowData.details.find(detail => detail.approval === null);
+                    if (!currentStep) return;
+
+                    // Update the current step with approval
+                    const { error: updateError } = await supabase
+                      .from('workflow_details')
+                      .update({
+                        approval: true,
+                        approver: (await supabase.auth.getUser()).data.user?.id,
+                        finished_at: new Date().toISOString()
+                      })
+                      .eq('id', currentStep.id);
+
+                    if (updateError) throw updateError;
+
+                    // Find the next step
+                    const nextStep = workflowData.details.find(detail => 
+                      detail.workflow_step === currentStep.workflow_step + 1
+                    );
+
+                    // If there is a next step, set its started_at
+                    if (nextStep) {
+                      const { error: nextStepError } = await supabase
+                        .from('workflow_details')
+                        .update({
+                          started_at: new Date().toISOString()
+                        })
+                        .eq('id', nextStep.id);
+
+                      if (nextStepError) throw nextStepError;
+                    }
+
+                    // Refresh workflow data
+                    await fetchWorkflowData(selectedDetailCard.id);
+                    
+                    setShowApprovalModal(false);
+                    setShowApprovedModal(true);
+                  } catch (error) {
+                    console.error('Error approving workflow step:', error);
+                    toast.error('Erro ao aprovar etapa do workflow');
+                  }
                 }}
               >
                 Aprovar
