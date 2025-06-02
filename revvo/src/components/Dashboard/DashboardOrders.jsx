@@ -532,10 +532,10 @@ const DashboardOrders = ({
   const [uploading, setUploading] = React.useState(false);
   const [uploadedFiles, setUploadedFiles] = React.useState([]);
   const [customerDetails, setCustomerDetails] = React.useState(null);
-  const [userCompanyId, setUserCompanyId] = React.useState(null);
-  const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
+  const [userCompanyId, setUserCompanyId] = React.useState(null);  const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
   const [workflowData, setWorkflowData] = useState(null);
   const [loadingWorkflow, setLoadingWorkflow] = useState(false);
+  const [selectedWorkflowStep, setSelectedWorkflowStep] = useState(null);
   
   // Format currency input
   const formatCurrency = (value) => {
@@ -900,10 +900,14 @@ const DashboardOrders = ({
                         Carregando workflow...
                       </div>
                     ) : workflowData?.details ? (
-                      workflowData.details.map((detail, index) => (
-                        <div 
+                      workflowData.details.map((detail, index) => (                        <div 
                           key={detail.id}
-                          onClick={() => detail.approval === null && setShowApprovalModal(true)}
+                          onClick={() => {
+                            if (detail.approval === null) {
+                              setSelectedWorkflowStep(detail);
+                              setShowApprovalModal(true);
+                            }
+                          }}
                           style={{ 
                             padding: '8px', 
                             background: 'white', 
@@ -1389,35 +1393,34 @@ const DashboardOrders = ({
           onInstallmentClick={handleInstallmentClick}
           selectedInstallment={selectedInstallment}
         />
-      </div>
-
-      {/* Approval Modal */}
+      </div>      {/* Approval Modal */}
       {showApprovalModal && (
-        <Modal>
-          <div className="modal-content">
+        <Modal>          <div className="modal-content">
             <div className="modal-header">
-              <h2 className="modal-title">Aprovação Comercial</h2>
-              <button 
+              <h2 className="modal-title">Aprovação {selectedWorkflowStep?.jurisdiction?.name || 'Comercial'}</h2><button 
                 className="close-button"
-                onClick={() => setShowApprovalModal(false)}
+                onClick={() => {
+                  setShowApprovalModal(false);
+                  setSelectedWorkflowStep(null);
+                }}
               >
                 <X size={20} />
               </button>
-            </div>
-
-            <div className="form-field">
+            </div>            <div className="form-field">
               <div className="label">Alçada</div>
-              <div>Gerente Comercial</div>
+              <div>{selectedWorkflowStep?.jurisdiction?.name || 'Não definida'}</div>
             </div>
 
             <div className="form-field">
               <div className="label">Data de Recebimento</div>
-              <div>15/03/2024, 09:30:00</div>
-            </div>
-
-            <div className="form-field">
+              <div>{selectedWorkflowStep?.started_at ? 
+                new Date(selectedWorkflowStep.started_at).toLocaleString('pt-BR') : 
+                '15/03/2024, 09:30:00'}</div>
+            </div>            <div className="form-field">
               <div className="label">Prazo</div>
-              <div>15/03/2024, 13:30:00</div>
+              <div>{selectedWorkflowStep?.deadline ? 
+                new Date(selectedWorkflowStep.deadline).toLocaleString('pt-BR') : 
+                '15/03/2024, 13:30:00'}</div>
             </div>
 
             <div className="form-field">
@@ -1425,22 +1428,22 @@ const DashboardOrders = ({
               <textarea placeholder="Digite seu parecer..." />
             </div>
 
-            <div className="actions">
+            <div className="actions">              
               <button 
                 className="reject"
-                onClick={() => setShowApprovalModal(false)}
+                onClick={() => {
+                  setShowApprovalModal(false);
+                  setSelectedWorkflowStep(null);
+                }}
               >
                 Rejeitar
-              </button>
+              </button>              
               <button 
                 className="approve"
                 onClick={async () => {
                   try {
-                    // Get the current workflow step
-                    const currentStep = workflowData.details.find(detail => detail.approval === null);
-                    if (!currentStep) return;
-
-                    // Update the current step with approval
+                    // Use the selected workflow step
+                    if (!selectedWorkflowStep) return;  // Update the selected step with approval
                     const { error: updateError } = await supabase
                       .from('workflow_details')
                       .update({
@@ -1448,13 +1451,13 @@ const DashboardOrders = ({
                         approver: (await supabase.auth.getUser()).data.user?.id,
                         finished_at: new Date().toISOString()
                       })
-                      .eq('id', currentStep.id);
+                      .eq('id', selectedWorkflowStep.id);
 
                     if (updateError) throw updateError;
 
                     // Find the next step
                     const nextStep = workflowData.details.find(detail => 
-                      detail.workflow_step === currentStep.workflow_step + 1
+                      detail.workflow_step === selectedWorkflowStep.workflow_step + 1
                     );
 
                     // If there is a next step, set its started_at
@@ -1471,8 +1474,8 @@ const DashboardOrders = ({
 
                     // Refresh workflow data
                     await fetchWorkflowData(selectedDetailCard.id);
-                    
-                    setShowApprovalModal(false);
+                      setShowApprovalModal(false);
+                    setSelectedWorkflowStep(null);
                     setShowApprovedModal(true);
                   } catch (error) {
                     console.error('Error approving workflow step:', error);
