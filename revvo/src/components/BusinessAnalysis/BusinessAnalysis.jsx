@@ -1310,7 +1310,7 @@ const BusinessAnalysis = () => {
                   <select
                     value={selectedCustomer}
                     onChange={(e) => setSelectedCustomer(e.target.value)}
-                    style={{ width: '200px', height: 32 }}
+                    style={{ width: '270px', height: 32 }}
                   >
                     <option value="">Todos</option>
                     {customers.map(customer => (
@@ -1319,13 +1319,6 @@ const BusinessAnalysis = () => {
                       </option>
                     ))}
                   </select>
-                  <input
-                    type="text"
-                    value={companyCodeFilter || ''}
-                    onChange={e => setCompanyCodeFilter(e.target.value)}
-                    placeholder="Código Cliente SAP"
-                    style={{ width: '200px', padding: '6px 8px', border: '1px solid #E5E7EB', borderRadius: 4, height: 32 }}
-                  />
                   <button style={{ marginTop: 2.5, border: '0px', color: 'white', background: '#0066FF'}} onClick={() => { setSelectedCustomer(''); setCompanyCodeFilter(''); }}>
                     Limpar filtros
                   </button>

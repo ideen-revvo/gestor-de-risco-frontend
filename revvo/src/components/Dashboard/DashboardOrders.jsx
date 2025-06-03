@@ -525,6 +525,7 @@ const DashboardOrders = ({
 }) => {
   const [showApprovalModal, setShowApprovalModal] = React.useState(false);
   const [showApprovedModal, setShowApprovedModal] = React.useState(false);
+  const [showViewModal, setShowViewModal] = React.useState(false);
   const [creditLimit, setCreditLimit] = React.useState('');
   const [prepaidLimit, setPrepaidLimit] = React.useState('');
   const [comments, setComments] = React.useState('');
@@ -532,7 +533,8 @@ const DashboardOrders = ({
   const [uploading, setUploading] = React.useState(false);
   const [uploadedFiles, setUploadedFiles] = React.useState([]);
   const [customerDetails, setCustomerDetails] = React.useState(null);
-  const [userCompanyId, setUserCompanyId] = React.useState(null);  const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
+  const [userCompanyId, setUserCompanyId] = React.useState(null);
+  const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
   const [workflowData, setWorkflowData] = useState(null);
   const [loadingWorkflow, setLoadingWorkflow] = useState(false);
   const [selectedWorkflowStep, setSelectedWorkflowStep] = useState(null);
@@ -906,6 +908,9 @@ const DashboardOrders = ({
                             if (detail.approval === null) {
                               setSelectedWorkflowStep(detail);
                               setShowApprovalModal(true);
+                            } else {
+                              setSelectedWorkflowStep(detail);
+                              setShowViewModal(true);
                             }
                           }}
                           style={{ 
@@ -916,7 +921,7 @@ const DashboardOrders = ({
                             display: 'flex',
                             justifyContent: 'space-between',
                             alignItems: 'center',
-                            cursor: detail.approval === null ? 'pointer' : 'default'
+                            cursor: 'pointer'
                           }}>
                           <div>
                             <div style={{ fontSize: '13px', fontWeight: '500' }}>{detail.jurisdiction?.name || 'N/A'}</div>
@@ -1417,10 +1422,10 @@ const DashboardOrders = ({
                 new Date(selectedWorkflowStep.started_at).toLocaleString('pt-BR') : 
                 '15/03/2024, 09:30:00'}</div>
             </div>            <div className="form-field">
-              <div className="label">Prazo</div>
-              <div>{selectedWorkflowStep?.deadline ? 
-                new Date(selectedWorkflowStep.deadline).toLocaleString('pt-BR') : 
-                '15/03/2024, 13:30:00'}</div>
+              <div className="label">Data de Conclusão</div>
+              <div>{selectedWorkflowStep?.finished_at ? 
+                new Date(selectedWorkflowStep.finished_at).toLocaleString('pt-BR') : 
+                'Pendente'}</div>
             </div>
 
             <div className="form-field">
@@ -1531,6 +1536,76 @@ const DashboardOrders = ({
                   resize: 'vertical'
                 }}
               >PARECER DEFINIDO</p>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* View Completed Step Modal */}
+      {showViewModal && (
+        <Modal>
+          <div className="modal-content">
+            <div className="modal-header">
+              <h2 className="modal-title">Detalhes da Etapa {selectedWorkflowStep?.jurisdiction?.name || 'Comercial'}</h2>
+              <button 
+                className="close-button"
+                onClick={() => {
+                  setShowViewModal(false);
+                  setSelectedWorkflowStep(null);
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="form-field">
+              <div className="label">Alçada</div>
+              <div>{selectedWorkflowStep?.jurisdiction?.name || 'Não definida'}</div>
+            </div>
+
+            <div className="form-field">
+              <div className="label">Data de Recebimento</div>
+              <div>{selectedWorkflowStep?.started_at ? 
+                new Date(selectedWorkflowStep.started_at).toLocaleString('pt-BR') : 
+                'N/A'}</div>
+            </div>
+
+            <div className="form-field">
+              <div className="label">Data de Conclusão</div>
+              <div>{selectedWorkflowStep?.finished_at ? 
+                new Date(selectedWorkflowStep.finished_at).toLocaleString('pt-BR') : 
+                'N/A'}</div>
+            </div>
+
+            <div className="form-field">
+              <div className="label">Status</div>
+              <div style={{ 
+                display: 'inline-block',
+                padding: '4px 12px',
+                borderRadius: '16px',
+                backgroundColor: selectedWorkflowStep?.approval ? 'rgba(62, 182, 85, 0.1)' : 'rgba(220, 38, 38, 0.1)',
+                color: selectedWorkflowStep?.approval ? '#3EB655' : '#DC2626',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}>
+                {selectedWorkflowStep?.approval ? 'Aprovado' : 'Rejeitado'}
+              </div>
+            </div>
+
+            <div className="form-field">
+              <div className="label">Parecer</div>
+              <div style={{
+                width: '100%',
+                minHeight: '100px',
+                padding: '12px',
+                borderRadius: '4px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--background)',
+                fontSize: '14px',
+                whiteSpace: 'pre-wrap'
+              }}>
+                {selectedWorkflowStep?.comments || 'Nenhum parecer registrado'}
+              </div>
             </div>
           </div>
         </Modal>
