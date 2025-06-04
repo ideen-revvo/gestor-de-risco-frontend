@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FunnelSimple, CaretDown, X } from '@phosphor-icons/react';
+import { FunnelSimple, CaretDown, X, CaretUp } from '@phosphor-icons/react';
 import { CheckCircle, Circle, Clock, User } from '@phosphor-icons/react';
 import { ResponsiveContainer, ComposedChart, BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import styled from 'styled-components';
@@ -721,12 +721,19 @@ const BusinessAnalysis = () => {
   const [comments, setComments] = React.useState('');
   const [saving, setSaving] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
-  const [creditLimitsId, setCreditLimitsId] = React.useState(null);
+  const [creditLimitsId, setCreditLimitsId] = React.useState(null);  
   const [uploading, setUploading] = React.useState(false);
   const [uploadedFiles, setUploadedFiles] = React.useState([]);
   const [customerDetails, setCustomerDetails] = React.useState(null);
   const [userCompanyId, setUserCompanyId] = React.useState(null);
   const [loadingCalculatedLimit, setLoadingCalculatedLimit] = useState(false);
+  
+  // Workflow-related state
+  const [workflowHistory, setWorkflowHistory] = useState([]);
+  const [loadingWorkflowHistory, setLoadingWorkflowHistory] = useState(false);
+  const [expandedWorkflows, setExpandedWorkflows] = useState(new Set());
+  const [showWorkflowModal, setShowWorkflowModal] = useState(false);
+  const [selectedWorkflowStep, setSelectedWorkflowStep] = useState(null);
   
   // Format currency input
   const formatCurrency = (value) => {
@@ -877,10 +884,89 @@ const BusinessAnalysis = () => {
       }
     } catch (error) {
       console.error('Error saving credit limit:', error);
-      toast.error(`Erro ao salvar análise financeira: ${error.message}`);
-    } finally {
+      toast.error(`Erro ao salvar análise financeira: ${error.message}`);    } finally {
       setSaving(false);
     }
+  };
+
+  // Function to fetch workflow history for a customer
+  const fetchWorkflowHistory = async (customerId) => {
+    if (!customerId) return;
+    
+    setLoadingWorkflowHistory(true);
+    try {
+      // First get credit limit requests for this customer
+      const { data: creditRequests, error: requestsError } = await supabase
+        .from('credit_limit_request')
+        .select('*')
+        .eq('customer_id', customerId)
+        .order('created_at', { ascending: false });
+
+      if (requestsError) throw requestsError;
+
+      if (creditRequests?.length > 0) {
+        const workflowHistoryData = [];
+
+        // For each credit request, get its workflow data
+        for (const request of creditRequests) {
+          // Get workflow_sale_order
+          const { data: workflowOrder, error: workflowOrderError } = await supabase
+            .from('workflow_sale_order')
+            .select('*')
+            .eq('credit_limit_req_id', request.id)
+            .single();
+
+          if (workflowOrderError || !workflowOrder) continue;
+
+          // Get workflow details with jurisdiction information
+          const { data: workflowDetails, error: workflowDetailsError } = await supabase
+            .from('workflow_details')
+            .select(`
+              *,
+              jurisdiction:user_role (
+                name,
+                description
+              )
+            `)
+            .eq('workflow_sale_order_id', workflowOrder.id)
+            .order('workflow_step', { ascending: true });
+
+          if (workflowDetailsError) continue;          workflowHistoryData.push({
+            id: workflowOrder.id,
+            creditRequest: request,
+            workflowOrder: workflowOrder,
+            details: workflowDetails || [],
+            created_at: request.created_at,
+            computedStatus: workflowDetails?.every(d => d.approval === true) ? 'approved' :
+                           workflowDetails?.some(d => d.approval === false) ? 'rejected' : 'pending'
+          });
+        }
+
+        setWorkflowHistory(workflowHistoryData);
+      } else {
+        setWorkflowHistory([]);
+      }
+    } catch (error) {
+      console.error('Error fetching workflow history:', error);
+      setWorkflowHistory([]);
+    } finally {
+      setLoadingWorkflowHistory(false);
+    }
+  };
+
+  const toggleWorkflowExpansion = (workflowId) => {
+    const newExpanded = new Set(expandedWorkflows);
+    if (newExpanded.has(workflowId)) {
+      newExpanded.delete(workflowId);
+    } else {
+      newExpanded.add(workflowId);
+    }
+    setExpandedWorkflows(newExpanded);
+  };
+
+  const handleWorkflowStepClick = (step) => {
+    setSelectedWorkflowStep(step);
+    setShowWorkflowModal(true);
   };
   
 
@@ -1097,11 +1183,19 @@ const BusinessAnalysis = () => {
       setCompanyName(selectedRequest.company_name);
     }
   }, []);
-
   useEffect(() => {
     // Carregar os limites de crédito do cliente sempre que o cliente selecionado mudar
     if (selectedCustomer) {
       loadCustomerCreditLimits(selectedCustomer);
+    }
+  }, [selectedCustomer]);
+
+  useEffect(() => {
+    // Carregar o histórico de workflow sempre que o cliente selecionado mudar
+    if (selectedCustomer) {
+      fetchWorkflowHistory(selectedCustomer);
+    } else {
+      setWorkflowHistory([]);
     }
   }, [selectedCustomer]);
 
@@ -1671,189 +1765,198 @@ const BusinessAnalysis = () => {
             </div>
           </DetailView>
           </div>
-            <HistoryAnalysisContainer>
-            <CustomerHistory>
-              {/* Histórico do cliente */}
-              <h4 style={{ marginBottom: '16px', color: 'black', fontWeight: '500'}}>Histórico do cliente</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                {/* Timeline item 1 */}
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                  <div style={{ 
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'rgba(62, 182, 85, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}>
-                    <div style={{ 
-                      width: '8px', 
-                      height: '8px', 
-                      borderRadius: '50%', 
-                      backgroundColor: '#3EB655',
-                    }}></div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ marginBottom: '8px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '500' }}>Liquidação de parcela</div>
-                      <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>18/06/2024 às 09:37</div>
-                    </div>
-                    <div style={{ 
-                      backgroundColor: 'var(--background)', 
-                      padding: '12px', 
-                      borderRadius: '8px',
-                      fontSize: '13px' 
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                        <div>N° da Parcela:</div>
-                        <div style={{ fontWeight: '500' }}>4</div>
-                      </div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <div>Valor:</div>
-                        <div style={{ fontWeight: '500' }}>R$ 1.000,00</div>
-                      </div>
-                    </div>
-                  </div>
+            <HistoryAnalysisContainer>            <CustomerHistory>
+              {/* Histórico de Workflow do Cliente */}
+              <h4 style={{ marginBottom: '16px', color: 'black', fontWeight: '500'}}>Histórico de Workflow do cliente</h4>
+              
+              {loadingWorkflowHistory ? (
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  padding: '20px',
+                  color: 'var(--secondary-text)'
+                }}>
+                  Carregando histórico...
                 </div>
-                
-                {/* Timeline item 2 */}
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                  <div style={{ 
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'rgba(79, 70, 229, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}>
-                    <div style={{ 
-                      width: '8px', 
-                      height: '8px', 
-                      borderRadius: '50%', 
-                      backgroundColor: '#4F46E5',
-                    }}></div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ marginBottom: '8px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '500' }}>Alteração de Domicílio</div>
-                      <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>18/06/2024 às 09:37</div>
-                    </div>
-                    <div style={{ 
-                      backgroundColor: 'var(--background)', 
-                      padding: '12px', 
-                      borderRadius: '8px',
-                      fontSize: '13px' 
-                    }}>
-                      <div style={{ marginBottom: '8px' }}>
-                        <div style={{ fontWeight: '500', marginBottom: '4px' }}>Dados Bancários Anteriores:</div>
-                        <div>117 - Corretora de Câmbio Ltda</div>
-                        <div>Agência: 0001-0 | Conta: 123456-6</div>
-                      </div>
-                      <div>
-                        <div style={{ fontWeight: '500', marginBottom: '4px' }}>Dados Bancários Novos:</div>
-                        <div>127 - Corretora de Câmbio 2 Ltda</div>
-                        <div>Agência: 0002-0 | Conta: 123456-6</div>
-                      </div>
-                    </div>
-                  </div>
+              ) : workflowHistory.length === 0 ? (
+                <div style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  padding: '20px',
+                  color: 'var(--secondary-text)'
+                }}>
+                  Nenhum histórico de workflow encontrado
                 </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {workflowHistory.map((workflow, index) => {
+                    const isExpanded = expandedWorkflows.has(workflow.workflowOrder?.id);
+                    const hasDetails = workflow.details && workflow.details.length > 0;
+                    
+                    // Determine status colors
+                    const getStatusColor = (status) => {
+                      switch (status?.toLowerCase()) {
+                        case 'approved':
+                        case 'aprovado':
+                          return { bg: 'rgba(62, 182, 85, 0.1)', color: '#3EB655' };
+                        case 'rejected':
+                        case 'rejeitado':
+                          return { bg: 'rgba(225, 29, 72, 0.1)', color: '#E11D48' };
+                        case 'pending':
+                        case 'pendente':
+                          return { bg: 'rgba(234, 88, 12, 0.1)', color: '#EA580C' };
+                        default:
+                          return { bg: 'rgba(79, 70, 229, 0.1)', color: '#4F46E5' };
+                      }
+                    };                    const statusColors = getStatusColor(workflow.computedStatus);
+                    
+                    // Translate status from English to Portuguese
+                    const translateStatus = (status) => {
+                      switch (status?.toLowerCase()) {
+                        case 'approved':
+                          return 'Aprovado';
+                        case 'rejected':
+                          return 'Rejeitado';
+                        case 'pending':
+                          return 'Pendente';
+                        default:
+                          return 'Em análise';
+                      }
+                    };
+                    
+                    const formatDate = (dateString) => {
+                      if (!dateString) return 'Data não disponível';
+                      try {
+                        return new Date(dateString).toLocaleString('pt-BR');
+                      } catch {
+                        return 'Data inválida';
+                      }
+                    };
 
-                {/* Timeline item 3 */}
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                  <div style={{ 
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'rgba(234, 88, 12, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}>
-                    <div style={{ 
-                      width: '8px', 
-                      height: '8px', 
-                      borderRadius: '50%', 
-                      backgroundColor: '#EA580C',
-                    }}></div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ marginBottom: '8px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '500' }}>Alteração de NF-e</div>
-                      <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>18/06/2024 às 09:37</div>
-                    </div>
-                    <div style={{ 
-                      backgroundColor: 'var(--background)', 
-                      padding: '12px', 
-                      borderRadius: '8px',
-                      fontSize: '13px' 
-                    }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                        <div>Alteração:</div>
-                        <div style={{ fontWeight: '500' }}>Mercadoria</div>
+                    return (
+                      <div key={workflow.workflowOrder?.id || index} style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+                        <div style={{ 
+                          width: '40px',
+                          height: '40px',
+                          borderRadius: '50%',
+                          background: statusColors.bg,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          flexShrink: 0
+                        }}>
+                          <div style={{ 
+                            width: '8px', 
+                            height: '8px', 
+                            borderRadius: '50%', 
+                            backgroundColor: statusColors.color,
+                          }}></div>
+                        </div>
+                        
+                        <div style={{ flex: 1 }}>
+                          <div style={{ marginBottom: '8px' }}>
+                            <div style={{ fontSize: '14px', fontWeight: '500' }}>
+                              Solicitação de Limite de Crédito
+                            </div>
+                            <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
+                              {formatDate(workflow.creditRequest?.created_at)}
+                            </div>
+                          </div>
+                          
+                          <div style={{ 
+                            backgroundColor: 'var(--background)', 
+                            padding: '12px', 
+                            borderRadius: '8px',
+                            fontSize: '13px' 
+                          }}>                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <div>Status:</div>
+                              <div style={{ fontWeight: '500', color: statusColors.color }}>
+                                {translateStatus(workflow.computedStatus)}
+                              </div>
+                            </div><div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                              <div>Valor Solicitado:</div>
+                              <div style={{ fontWeight: '500' }}>
+                                {workflow.creditRequest?.credit_limit_amt 
+                                  ? `R$ ${parseFloat(workflow.creditRequest.credit_limit_amt).toLocaleString('pt-BR', {
+                                      minimumFractionDigits: 2,
+                                      maximumFractionDigits: 2
+                                    })}`
+                                  : 'N/A'
+                                }
+                              </div>                            </div>
+                            
+                            {hasDetails && (
+                              <div style={{ marginTop: '8px' }}>
+                                <button
+                                  onClick={() => toggleWorkflowExpansion(workflow.workflowOrder.id)}
+                                  style={{
+                                    background: 'none',
+                                    border: 'none',
+                                    color: statusColors.color,
+                                    fontSize: '13px',
+                                    fontWeight: '500',
+                                    cursor: 'pointer',
+                                    padding: '0',
+                                    textDecoration: 'underline'
+                                  }}
+                                >
+                                  {isExpanded ? 'Ocultar detalhes' : `Ver detalhes (${workflow.details.length} etapas)`}
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                          
+                          {isExpanded && hasDetails && (
+                            <div style={{ marginTop: '12px' }}>
+                              <div style={{ fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--secondary-text)' }}>
+                                Etapas do Workflow:
+                              </div>
+                              {workflow.details.map((detail, detailIndex) => (
+                                <div 
+                                  key={detail.id || detailIndex}
+                                  onClick={() => handleWorkflowStepClick(detail)}
+                                  style={{
+                                    backgroundColor: 'var(--background)',
+                                    border: '1px solid rgba(0,0,0,0.1)',
+                                    borderRadius: '6px',
+                                    padding: '8px 12px',
+                                    marginBottom: '4px',
+                                    fontSize: '12px',
+                                    cursor: 'pointer',
+                                    transition: 'background-color 0.2s'
+                                  }}
+                                  onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(79, 70, 229, 0.05)'}
+                                  onMouseLeave={(e) => e.target.style.backgroundColor = 'var(--background)'}
+                                >
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <div style={{ fontWeight: '500' }}>
+                                      {detail.jurisdiction_name || `Etapa ${detailIndex + 1}`}
+                                    </div>
+                                    <div style={{ 
+                                      fontSize: '11px', 
+                                      color: 'var(--secondary-text)',
+                                      fontStyle: 'italic'
+                                    }}>
+                                      Clique para ver detalhes
+                                    </div>
+                                  </div>
+                                  {detail.created_at && (
+                                    <div style={{ fontSize: '11px', color: 'var(--secondary-text)', marginTop: '2px' }}>
+                                      {formatDate(detail.created_at)}
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  </div>
+                    );
+                  })}
                 </div>
-                
-                {/* Timeline item 4 */}
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                  <div style={{ 
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'rgba(2, 132, 199, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}>
-                    <div style={{ 
-                      width: '8px', 
-                      height: '8px', 
-                      borderRadius: '50%', 
-                      backgroundColor: '#0284C7',
-                    }}></div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ marginBottom: '8px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '500' }}>Recebimento de Mercadoria</div>
-                      <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>18/06/2024 às 09:37</div>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Timeline item 5 */}
-                <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-                  <div style={{ 
-                    width: '40px',
-                    height: '40px',
-                    borderRadius: '50%',
-                    background: 'rgba(225, 29, 72, 0.1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0
-                  }}>
-                    <div style={{ 
-                      width: '8px', 
-                      height: '8px', 
-                      borderRadius: '50%', 
-                      backgroundColor: '#E11D48',
-                    }}></div>
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ marginBottom: '8px' }}>
-                      <div style={{ fontSize: '14px', fontWeight: '500' }}>Cancelamento de NF-e</div>
-                      <div style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>18/06/2024 às 09:37</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
+              )}
             </CustomerHistory>
             <FinancialAnalysisContainer>
               <h4>Análise Financeira</h4>
@@ -1982,10 +2085,216 @@ const BusinessAnalysis = () => {
             }}>
               <h3 style={{ marginBottom: '16px' }}>Pedidos do Cliente</h3>
               <OrdersTable 
-                orders={salesOrders}
-              />
+                orders={salesOrders}              />
             </div>
           </>
+        )}
+        
+        {/* Workflow Step Details Modal */}
+        {showWorkflowModal && selectedWorkflowStep && (
+          <div style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(0,0,0,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999
+          }}>
+            <div style={{
+              background: 'white',
+              borderRadius: '8px',
+              padding: '32px',
+              minWidth: '500px',
+              maxWidth: '600px',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+            }}>
+              <div style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                marginBottom: '24px'
+              }}>
+                <h2 style={{
+                  fontWeight: '600',
+                  fontSize: '18px',
+                  color: 'var(--primary-text)'
+                }}>
+                  Detalhes da Etapa: {selectedWorkflowStep.jurisdiction_name || 'N/A'}
+                </h2>
+                <button
+                  onClick={() => {
+                    setShowWorkflowModal(false);
+                    setSelectedWorkflowStep(null);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    fontSize: '20px',
+                    cursor: 'pointer',
+                    color: 'var(--secondary-text)'
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div style={{ marginBottom: '16px' }}>
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gap: '16px',
+                  marginBottom: '16px'
+                }}>
+                  <div>
+                    <label style={{ 
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: 'var(--secondary-text)',
+                      marginBottom: '4px'
+                    }}>
+                      Etapa do Workflow
+                    </label>
+                    <div style={{ fontSize: '14px' }}>
+                      {selectedWorkflowStep.workflow_step || 'N/A'}
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ 
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: 'var(--secondary-text)',
+                      marginBottom: '4px'
+                    }}>
+                      Status
+                    </label>
+                    <div style={{ 
+                      fontSize: '14px',
+                      color: selectedWorkflowStep.approval === null ? '#EA580C' :
+                             selectedWorkflowStep.approval === true ? '#3EB655' : '#E11D48'
+                    }}>
+                      {selectedWorkflowStep.approval === null ? 'Pendente' :
+                       selectedWorkflowStep.approval === true ? 'Aprovado' : 'Rejeitado'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ 
+                  display: 'grid', 
+                  gridTemplateColumns: '1fr 1fr', 
+                  gap: '16px',
+                  marginBottom: '16px'
+                }}>
+                  <div>
+                    <label style={{ 
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: 'var(--secondary-text)',
+                      marginBottom: '4px'
+                    }}>
+                      Data de Início
+                    </label>
+                    <div style={{ fontSize: '14px' }}>
+                      {selectedWorkflowStep.started_at ? 
+                        new Date(selectedWorkflowStep.started_at).toLocaleString('pt-BR') : 
+                        'Não iniciado'
+                      }
+                    </div>
+                  </div>
+                  <div>
+                    <label style={{ 
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: 'var(--secondary-text)',
+                      marginBottom: '4px'
+                    }}>
+                      Data de Conclusão
+                    </label>
+                    <div style={{ fontSize: '14px' }}>
+                      {selectedWorkflowStep.finished_at ? 
+                        new Date(selectedWorkflowStep.finished_at).toLocaleString('pt-BR') : 
+                        'Pendente'
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                {selectedWorkflowStep.approver && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ 
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: 'var(--secondary-text)',
+                      marginBottom: '4px'
+                    }}>
+                      Aprovador
+                    </label>
+                    <div style={{ fontSize: '14px' }}>
+                      {selectedWorkflowStep.approver}
+                    </div>
+                  </div>
+                )}
+
+                {selectedWorkflowStep.parecer && (
+                  <div style={{ marginBottom: '16px' }}>
+                    <label style={{ 
+                      display: 'block',
+                      fontSize: '13px',
+                      fontWeight: '500',
+                      color: 'var(--secondary-text)',
+                      marginBottom: '4px'
+                    }}>
+                      Parecer
+                    </label>
+                    <div style={{ 
+                      fontSize: '14px',
+                      backgroundColor: 'var(--background)',
+                      padding: '12px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--border-color)',
+                      whiteSpace: 'pre-wrap'
+                    }}>
+                      {selectedWorkflowStep.parecer}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ 
+                display: 'flex', 
+                justifyContent: 'flex-end',
+                paddingTop: '16px',
+                borderTop: '1px solid var(--border-color)'
+              }}>
+                <button
+                  onClick={() => {
+                    setShowWorkflowModal(false);
+                    setSelectedWorkflowStep(null);
+                  }}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: 'var(--primary-blue)',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: '500'
+                  }}
+                >
+                  Fechar
+                </button>
+              </div>
+            </div>
+          </div>
         )}
         
     </>
