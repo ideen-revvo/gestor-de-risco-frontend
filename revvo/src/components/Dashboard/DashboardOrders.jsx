@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
-import { X, User } from '@phosphor-icons/react';
+import { X, User, CheckCircle, Clock, Circle } from '@phosphor-icons/react';
 import OrdersTable from '../OrdersTable';
 import { supabase } from '../../lib/supabase';
+import { getGlobalCompanyId } from '../../lib/globalState';
 import { toast } from 'react-hot-toast';
 
 const CaixaEntradaContainer = styled.div`
@@ -561,53 +562,361 @@ const DashboardOrders = ({
       return;
     }
 
-    const creditLimitValue = parseCurrency(creditLimit);
-    const prepaidLimitValue = parseCurrency(prepaidLimit);
-    
-    if (!creditLimitValue && !prepaidLimitValue) {
-      toast.error('Informe pelo menos um dos limites');
-      return;
-    }
-
-    setSaving(true);
-    
     try {
-      // 1. Create a record in credit_limit_amount table
-      const { data: creditLimitData, error: creditLimitError } = await supabase
-        .from('credit_limit_amount')
-        .insert([{
-          credit_limit: creditLimitValue ? Number(creditLimitValue) / 100 : null,
-          prepaid_limit: prepaidLimitValue ? Number(prepaidLimitValue) / 100 : null,
-          comments: comments || null
-        }])
-        .select('id')
+      setSaving(true);
+
+      // Get the current user's role
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: userProfile } = await supabase
+        .from('user_profile')
+        .select('role_id')
+        .eq('logged_id', user.id)
         .single();
 
-      if (creditLimitError) throw creditLimitError;
-      
-      if (!creditLimitData?.id) {
-        throw new Error('Erro ao criar registro de limite de crédito');
+      if (!userProfile) {
+        throw new Error('Perfil de usuário não encontrado');
       }
-      
-      // 2. Update customer with the credit_limits_id
-      const customerId = selectedDetailCard.customer_id || selectedDetailCard.customer?.id;
-      
-      if (!customerId) {
-        throw new Error('ID do cliente não encontrado');
+
+      // Get workflow rules to check subordination
+      const { data: workflowRules, error: workflowRulesError } = await supabase
+        .from('workflow_rules')
+        .select('*')
+        .eq('company_id', getGlobalCompanyId())
+        .order('value_range', { ascending: true });
+
+      if (workflowRulesError) {
+        throw new Error('Erro ao buscar regras de workflow');
       }
-      
-      const { error: customerUpdateError } = await supabase
-        .from('customer')
-        .update({ credit_limits_id: creditLimitData.id })
-        .eq('id', customerId);
-        
-      if (customerUpdateError) throw customerUpdateError;
-      
-      toast.success('Análise financeira salva com sucesso!');
-      
+
+      if (!workflowRules || workflowRules.length === 0) {
+        throw new Error('Nenhuma regra de workflow encontrada');
+      }
+
+      // Find the current step's rule
+      const currentStepRule = workflowRules.find(rule => 
+        rule.role_id === selectedWorkflowStep.jurisdiction_id
+      );
+
+      if (!currentStepRule) {
+        throw new Error('Regra de workflow não encontrada para a etapa atual');
+      }
+
+      // If user is administrator (role_id 1), they can approve/reject without checking their role rule
+      if (userProfile.role_id === 1) {
+        // Update the selected step with approval
+        const { error: updateError } = await supabase
+          .from('workflow_details')
+          .update({
+            approval: true,
+            approver: user.id,
+            finished_at: new Date().toISOString(),
+            parecer: comments
+          })
+          .eq('id', selectedWorkflowStep.id);
+
+        if (updateError) throw updateError;
+
+        // Get all previous steps
+        const previousSteps = workflowData.details.filter(detail => 
+          detail.workflow_step < selectedWorkflowStep.workflow_step
+        );
+
+        // For each previous step, check if it should be automatically approved
+        for (const step of previousSteps) {
+          // Find the rule for this step
+          const stepRule = workflowRules.find(rule => 
+            rule.role_id === step.jurisdiction_id
+          );
+
+          if (!stepRule) continue;
+
+          // If subordination is enabled for this step and user has higher role,
+          // or if this is a lower step in the chain, approve it
+          if ((stepRule.subordination && userRoleRule.value_range[0] > stepRule.value_range[0]) ||
+              stepRule.value_range[0] < currentStepRule.value_range[0]) {
+            const { error: lowerStepError } = await supabase
+              .from('workflow_details')
+              .update({
+                approval: true,
+                approver: user.id,
+                finished_at: new Date().toISOString(),
+                parecer: comments // Usando o mesmo parecer da etapa superior
+              })
+              .eq('id', step.id);
+
+            if (lowerStepError) throw lowerStepError;
+          }
+        }
+
+        // Find the next step
+        const nextStep = workflowData.details.find(detail => 
+          detail.workflow_step === selectedWorkflowStep.workflow_step + 1
+        );
+
+        // If there is a next step, set its started_at
+        if (nextStep) {
+          const { error: nextStepError } = await supabase
+            .from('workflow_details')
+            .update({
+              started_at: new Date().toISOString()
+            })
+            .eq('id', nextStep.id);
+
+          if (nextStepError) throw nextStepError;
+        }
+
+        // Refresh workflow data
+        await fetchWorkflowData(selectedDetailCard.id);
+        setShowApprovalModal(false);
+        setSelectedWorkflowStep(null);
+        setShowApprovedModal(true);
+        setComments('');
+        return;
+      }
+
+      // For non-administrator users, check their role rule
+      const userRoleRule = workflowRules.find(rule => 
+        rule.role_id === userProfile.role_id
+      );
+
+      if (!userRoleRule) {
+        throw new Error('Regra de workflow não encontrada para o seu cargo');
+      }
+
+      // Check if user can approve based on subordination
+      const canApprove = 
+        // User is in the current step's role
+        userProfile.role_id === selectedWorkflowStep.jurisdiction_id ||
+        // Or user has a higher role and subordination is enabled
+        (userRoleRule.value_range[0] > currentStepRule.value_range[0] && currentStepRule.subordination);
+
+      if (!canApprove) {
+        toast.error('Você não tem permissão para aprovar esta etapa');
+        return;
+      }
+
+      // Update the selected step with approval
+      const { error: updateError } = await supabase
+        .from('workflow_details')
+        .update({
+          approval: true,
+          approver: user.id,
+          finished_at: new Date().toISOString(),
+          parecer: comments
+        })
+        .eq('id', selectedWorkflowStep.id);
+
+      if (updateError) throw updateError;
+
+      // Get all previous steps
+      const previousSteps = workflowData.details.filter(detail => 
+        detail.workflow_step < selectedWorkflowStep.workflow_step
+      );
+
+      // For each previous step, check if it should be automatically approved
+      for (const step of previousSteps) {
+        // Find the rule for this step
+        const stepRule = workflowRules.find(rule => 
+          rule.role_id === step.jurisdiction_id
+        );
+
+        if (!stepRule) continue;
+
+        // If subordination is enabled for this step and user has higher role,
+        // or if this is a lower step in the chain, approve it
+        if ((stepRule.subordination && userRoleRule.value_range[0] > stepRule.value_range[0]) ||
+            stepRule.value_range[0] < currentStepRule.value_range[0]) {
+          const { error: lowerStepError } = await supabase
+            .from('workflow_details')
+            .update({
+              approval: true,
+              approver: user.id,
+              finished_at: new Date().toISOString(),
+              parecer: comments // Usando o mesmo parecer da etapa superior
+            })
+            .eq('id', step.id);
+
+          if (lowerStepError) throw lowerStepError;
+        }
+      }
+
+      // Find the next step
+      const nextStep = workflowData.details.find(detail => 
+        detail.workflow_step === selectedWorkflowStep.workflow_step + 1
+      );
+
+      // If there is a next step, set its started_at
+      if (nextStep) {
+        const { error: nextStepError } = await supabase
+          .from('workflow_details')
+          .update({
+            started_at: new Date().toISOString()
+          })
+          .eq('id', nextStep.id);
+
+        if (nextStepError) throw nextStepError;
+      }
+
+      // Refresh workflow data
+      await fetchWorkflowData(selectedDetailCard.id);
+      setShowApprovalModal(false);
+      setSelectedWorkflowStep(null);
+      setShowApprovedModal(true);
+      setComments('');
     } catch (error) {
-      console.error('Error saving credit limit:', error);
-      toast.error(`Erro ao salvar análise financeira: ${error.message}`);
+      console.error('Error approving workflow step:', error);
+      toast.error(error.message || 'Erro ao aprovar etapa do workflow');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleRejectAnalysis = async () => {
+    try {
+      setSaving(true);
+
+      // Get the current user's role
+      const { data: { user } } = await supabase.auth.getUser();
+      const { data: userProfile } = await supabase
+        .from('user_profile')
+        .select('role_id')
+        .eq('logged_id', user.id)
+        .single();
+
+      if (!userProfile) {
+        throw new Error('Perfil de usuário não encontrado');
+      }
+
+      // Get workflow rules to check subordination
+      const { data: workflowRules, error: workflowRulesError } = await supabase
+        .from('workflow_rules')
+        .select('*')
+        .eq('company_id', getGlobalCompanyId())
+        .order('value_range', { ascending: true });
+
+      if (workflowRulesError) {
+        throw new Error('Erro ao buscar regras de workflow');
+      }
+
+      if (!workflowRules || workflowRules.length === 0) {
+        throw new Error('Nenhuma regra de workflow encontrada');
+      }
+
+      // Find the current step's rule
+      const currentStepRule = workflowRules.find(rule => 
+        rule.role_id === selectedWorkflowStep.jurisdiction_id
+      );
+
+      if (!currentStepRule) {
+        throw new Error('Regra de workflow não encontrada para a etapa atual');
+      }
+
+      // If user is administrator (role_id 1), they can approve/reject without checking their role rule
+      if (userProfile.role_id === 1) {
+        // Update the selected step with rejection
+        const { error: updateError } = await supabase
+          .from('workflow_details')
+          .update({
+            approval: false,
+            approver: user.id,
+            finished_at: new Date().toISOString(),
+            parecer: comments
+          })
+          .eq('id', selectedWorkflowStep.id);
+
+        if (updateError) throw updateError;
+
+        // Automatically reject all previous steps
+        const previousSteps = workflowData.details.filter(detail => 
+          detail.workflow_step < selectedWorkflowStep.workflow_step
+        );
+
+        for (const step of previousSteps) {
+          const { error: lowerStepError } = await supabase
+            .from('workflow_details')
+            .update({
+              approval: false,
+              approver: user.id,
+              finished_at: new Date().toISOString(),
+              parecer: 'Rejeitado automaticamente pelo administrador'
+            })
+            .eq('id', step.id);
+
+          if (lowerStepError) throw lowerStepError;
+        }
+
+        // Refresh workflow data
+        await fetchWorkflowData(selectedDetailCard.id);
+        setShowApprovalModal(false);
+        setSelectedWorkflowStep(null);
+        setComments('');
+        return;
+      }
+
+      // For non-administrator users, check their role rule
+      const userRoleRule = workflowRules.find(rule => 
+        rule.role_id === userProfile.role_id
+      );
+
+      if (!userRoleRule) {
+        throw new Error('Regra de workflow não encontrada para o seu cargo');
+      }
+
+      // Check if user can reject based on subordination
+      const canReject = 
+        // User is in the current step's role
+        userProfile.role_id === selectedWorkflowStep.jurisdiction_id ||
+        // Or user has a higher role and subordination is enabled
+        (userRoleRule.value_range[0] > currentStepRule.value_range[0] && currentStepRule.subordination);
+
+      if (!canReject) {
+        toast.error('Você não tem permissão para rejeitar esta etapa');
+        return;
+      }
+
+      // Update the selected step with rejection
+      const { error: updateError } = await supabase
+        .from('workflow_details')
+        .update({
+          approval: false,
+          approver: user.id,
+          finished_at: new Date().toISOString(),
+          parecer: comments
+        })
+        .eq('id', selectedWorkflowStep.id);
+
+      if (updateError) throw updateError;
+
+      // If subordination is enabled and this is a higher role rejecting,
+      // automatically reject all previous steps
+      if (currentStepRule.subordination && userRoleRule.value_range[0] > currentStepRule.value_range[0]) {
+        const previousSteps = workflowData.details.filter(detail => 
+          detail.workflow_step < selectedWorkflowStep.workflow_step
+        );
+
+        for (const step of previousSteps) {
+          const { error: lowerStepError } = await supabase
+            .from('workflow_details')
+            .update({
+              approval: false,
+              approver: user.id,
+              finished_at: new Date().toISOString(),
+              parecer: 'Rejeitado automaticamente por subordinação'
+            })
+            .eq('id', step.id);
+
+          if (lowerStepError) throw lowerStepError;
+        }
+      }
+
+      // Refresh workflow data
+      await fetchWorkflowData(selectedDetailCard.id);
+      setShowApprovalModal(false);
+      setSelectedWorkflowStep(null);
+      setComments('');
+    } catch (error) {
+      console.error('Error rejecting workflow step:', error);
+      toast.error(error.message || 'Erro ao rejeitar etapa do workflow');
     } finally {
       setSaving(false);
     }
@@ -1536,65 +1845,27 @@ const DashboardOrders = ({
 
             <div className="form-field">
               <div className="label">Parecer</div>
-              <textarea placeholder="Digite seu parecer..." />
+              <textarea 
+                value={comments}
+                onChange={(e) => setComments(e.target.value)}
+                placeholder="Digite seu parecer..." 
+              />
             </div>
 
             <div className="actions">              
               <button 
                 className="reject"
-                onClick={() => {
-                  setShowApprovalModal(false);
-                  setSelectedWorkflowStep(null);
-                }}
+                onClick={handleRejectAnalysis}
+                disabled={saving}
               >
-                Rejeitar
+                {saving ? 'Rejeitando...' : 'Rejeitar'}
               </button>              
               <button 
                 className="approve"
-                onClick={async () => {
-                  try {
-                    // Use the selected workflow step
-                    if (!selectedWorkflowStep) return;  // Update the selected step with approval
-                    const { error: updateError } = await supabase
-                      .from('workflow_details')
-                      .update({
-                        approval: true,
-                        approver: (await supabase.auth.getUser()).data.user?.id,
-                        finished_at: new Date().toISOString()
-                      })
-                      .eq('id', selectedWorkflowStep.id);
-
-                    if (updateError) throw updateError;
-
-                    // Find the next step
-                    const nextStep = workflowData.details.find(detail => 
-                      detail.workflow_step === selectedWorkflowStep.workflow_step + 1
-                    );
-
-                    // If there is a next step, set its started_at
-                    if (nextStep) {
-                      const { error: nextStepError } = await supabase
-                        .from('workflow_details')
-                        .update({
-                          started_at: new Date().toISOString()
-                        })
-                        .eq('id', nextStep.id);
-
-                      if (nextStepError) throw nextStepError;
-                    }
-
-                    // Refresh workflow data
-                    await fetchWorkflowData(selectedDetailCard.id);
-                      setShowApprovalModal(false);
-                    setSelectedWorkflowStep(null);
-                    setShowApprovedModal(true);
-                  } catch (error) {
-                    console.error('Error approving workflow step:', error);
-                    toast.error('Erro ao aprovar etapa do workflow');
-                  }
-                }}
+                onClick={handleSaveAnalysis}
+                disabled={saving}
               >
-                Aprovar
+                {saving ? 'Aprovando...' : 'Aprovar'}
               </button>
             </div>
           </div>

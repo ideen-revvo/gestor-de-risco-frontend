@@ -73,6 +73,7 @@ const WorkflowRules = () => {
             value_range: formData.value_range,
             role_id: formData.role_id,
             type_id: formData.type_id,
+            subordination: formData.subordination,
             last_update: new Date().toISOString(),
             updated_by: (await supabase.auth.getUser()).data.user?.id
           })
@@ -91,6 +92,7 @@ const WorkflowRules = () => {
               role_id: formData.role_id,
               company_id: getGlobalCompanyId(),
               type_id: formData.type_id,
+              subordination: formData.subordination,
               creator: (await supabase.auth.getUser()).data.user?.id
             }
           ]);

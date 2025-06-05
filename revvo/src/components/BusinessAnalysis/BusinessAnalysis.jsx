@@ -892,7 +892,6 @@ const BusinessAnalysis = () => {
   // Function to fetch workflow history for a customer
   const fetchWorkflowHistory = async (customerId) => {
     if (!customerId) return;
-    
     setLoadingWorkflowHistory(true);
     try {
       // First get credit limit requests for this customer
@@ -931,14 +930,39 @@ const BusinessAnalysis = () => {
             .eq('workflow_sale_order_id', workflowOrder.id)
             .order('workflow_step', { ascending: true });
 
-          if (workflowDetailsError) continue;          workflowHistoryData.push({
+          if (workflowDetailsError) continue;
+
+          // Buscar nomes dos aprovadores em batch
+          let detailsWithApprover = workflowDetails;
+          const approverIds = workflowDetails
+            .map(d => d.approver)
+            .filter(id => !!id);
+          let approverMap = {};
+          if (approverIds.length > 0) {
+            const { data: approversData } = await supabase
+              .from('user_profile')
+              .select('logged_id, name')
+              .in('logged_id', approverIds);
+            if (approversData) {
+              approverMap = approversData.reduce((acc, cur) => {
+                acc[cur.logged_id] = cur.name;
+                return acc;
+              }, {});
+            }
+          }
+          detailsWithApprover = workflowDetails.map(d => ({
+            ...d,
+            approver_name: d.approver ? approverMap[d.approver] || d.approver : null
+          }));
+
+          workflowHistoryData.push({
             id: workflowOrder.id,
             creditRequest: request,
             workflowOrder: workflowOrder,
-            details: workflowDetails || [],
+            details: detailsWithApprover || [],
             created_at: request.created_at,
-            computedStatus: workflowDetails?.every(d => d.approval === true) ? 'approved' :
-                           workflowDetails?.some(d => d.approval === false) ? 'rejected' : 'pending'
+            computedStatus: detailsWithApprover?.every(d => d.approval === true) ? 'approved' :
+                           detailsWithApprover?.some(d => d.approval === false) ? 'rejected' : 'pending'
           });
         }
 
@@ -1913,42 +1937,46 @@ const BusinessAnalysis = () => {
                               <div style={{ fontSize: '13px', fontWeight: '500', marginBottom: '8px', color: 'var(--secondary-text)' }}>
                                 Etapas do Workflow:
                               </div>
-                              {workflow.details.map((detail, detailIndex) => (
-                                <div 
-                                  key={detail.id || detailIndex}
-                                  onClick={() => handleWorkflowStepClick(detail)}
-                                  style={{
-                                    backgroundColor: 'var(--background)',
-                                    border: '1px solid rgba(0,0,0,0.1)',
-                                    borderRadius: '6px',
-                                    padding: '8px 12px',
-                                    marginBottom: '4px',
-                                    fontSize: '12px',
-                                    cursor: 'pointer',
-                                    transition: 'background-color 0.2s'
-                                  }}
-                                  onMouseEnter={(e) => e.target.style.backgroundColor = 'rgba(79, 70, 229, 0.05)'}
-                                  onMouseLeave={(e) => e.target.style.backgroundColor = 'var(--background)'}
-                                >
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                    <div style={{ fontWeight: '500' }}>
-                                      {detail.jurisdiction_name || `Etapa ${detailIndex + 1}`}
+                              {workflow.details.map((detail, detailIndex) => {
+                                const statusColor =
+                                  detail.approval === null ? '#EA580C' :
+                                  detail.approval === true ? '#3EB655' : '#E11D48';
+                                return (
+                                  <div
+                                    key={detail.id || detailIndex}
+                                    onClick={() => handleWorkflowStepClick(detail)}
+                                    style={{
+                                      backgroundColor: 'var(--background)',
+                                      border: '1px solid rgba(0,0,0,0.1)',
+                                      borderRadius: '6px',
+                                      padding: '12px 16px',
+                                      marginBottom: '4px',
+                                      fontSize: '13px',
+                                      cursor: 'pointer',
+                                      transition: 'background-color 0.2s',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '4px',
+                                    }}
+                                    onMouseEnter={e => e.currentTarget.style.backgroundColor = 'rgba(79, 70, 229, 0.05)'}
+                                    onMouseLeave={e => e.currentTarget.style.backgroundColor = 'var(--background)'}
+                                  >
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <div style={{ fontWeight: '500' }}>{detail.jurisdiction_name || detail.jurisdiction?.name || `Etapa ${detailIndex + 1}`}</div>
+                                      <div style={{ color: statusColor, fontWeight: 500 }}>
+                                        {detail.approval === null ? 'Pendente' : detail.approval === true ? 'Aprovado' : 'Rejeitado'}
+                                      </div>
                                     </div>
-                                    <div style={{ 
-                                      fontSize: '11px', 
-                                      color: 'var(--secondary-text)',
-                                      fontStyle: 'italic'
-                                    }}>
-                                      Clique para ver detalhes
+                                    <div style={{ display: 'flex', gap: '16px', fontSize: '12px', color: 'var(--secondary-text)' }}>
+                                      <div>Início: {detail.started_at ? new Date(detail.started_at).toLocaleString('pt-BR') : 'Não iniciado'}</div>
+                                      <div>Conclusão: {detail.finished_at ? new Date(detail.finished_at).toLocaleString('pt-BR') : 'Pendente'}</div>
                                     </div>
+                                    {detail.approver_name && (
+                                      <div style={{ fontSize: '12px', color: '#2563EB' }}>Aprovador: {detail.approver_name}</div>
+                                    )}
                                   </div>
-                                  {detail.created_at && (
-                                    <div style={{ fontSize: '11px', color: 'var(--secondary-text)', marginTop: '2px' }}>
-                                      {formatDate(detail.created_at)}
-                                    </div>
-                                  )}
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           )}
                         </div>
@@ -2108,8 +2136,8 @@ const BusinessAnalysis = () => {
               background: 'white',
               borderRadius: '8px',
               padding: '32px',
-              minWidth: '500px',
-              maxWidth: '600px',
+              minWidth: '400px',
+              maxWidth: '500px',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
             }}>
               <div style={{
@@ -2118,12 +2146,8 @@ const BusinessAnalysis = () => {
                 alignItems: 'center',
                 marginBottom: '24px'
               }}>
-                <h2 style={{
-                  fontWeight: '600',
-                  fontSize: '18px',
-                  color: 'var(--primary-text)'
-                }}>
-                  Detalhes da Etapa: {selectedWorkflowStep.jurisdiction_name || 'N/A'}
+                <h2 style={{ fontWeight: '600', fontSize: '18px', color: 'var(--primary-text)' }}>
+                  Parecer da Etapa
                 </h2>
                 <button
                   onClick={() => {
@@ -2141,139 +2165,10 @@ const BusinessAnalysis = () => {
                   ×
                 </button>
               </div>
-
-              <div style={{ marginBottom: '16px' }}>
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: '1fr 1fr', 
-                  gap: '16px',
-                  marginBottom: '16px'
-                }}>
-                  <div>
-                    <label style={{ 
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: 'var(--secondary-text)',
-                      marginBottom: '4px'
-                    }}>
-                      Etapa do Workflow
-                    </label>
-                    <div style={{ fontSize: '14px' }}>
-                      {selectedWorkflowStep.workflow_step || 'N/A'}
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ 
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: 'var(--secondary-text)',
-                      marginBottom: '4px'
-                    }}>
-                      Status
-                    </label>
-                    <div style={{ 
-                      fontSize: '14px',
-                      color: selectedWorkflowStep.approval === null ? '#EA580C' :
-                             selectedWorkflowStep.approval === true ? '#3EB655' : '#E11D48'
-                    }}>
-                      {selectedWorkflowStep.approval === null ? 'Pendente' :
-                       selectedWorkflowStep.approval === true ? 'Aprovado' : 'Rejeitado'}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ 
-                  display: 'grid', 
-                  gridTemplateColumns: '1fr 1fr', 
-                  gap: '16px',
-                  marginBottom: '16px'
-                }}>
-                  <div>
-                    <label style={{ 
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: 'var(--secondary-text)',
-                      marginBottom: '4px'
-                    }}>
-                      Data de Início
-                    </label>
-                    <div style={{ fontSize: '14px' }}>
-                      {selectedWorkflowStep.started_at ? 
-                        new Date(selectedWorkflowStep.started_at).toLocaleString('pt-BR') : 
-                        'Não iniciado'
-                      }
-                    </div>
-                  </div>
-                  <div>
-                    <label style={{ 
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: 'var(--secondary-text)',
-                      marginBottom: '4px'
-                    }}>
-                      Data de Conclusão
-                    </label>
-                    <div style={{ fontSize: '14px' }}>
-                      {selectedWorkflowStep.finished_at ? 
-                        new Date(selectedWorkflowStep.finished_at).toLocaleString('pt-BR') : 
-                        'Pendente'
-                      }
-                    </div>
-                  </div>
-                </div>
-
-                {selectedWorkflowStep.approver && (
-                  <div style={{ marginBottom: '16px' }}>
-                    <label style={{ 
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: 'var(--secondary-text)',
-                      marginBottom: '4px'
-                    }}>
-                      Aprovador
-                    </label>
-                    <div style={{ fontSize: '14px' }}>
-                      {selectedWorkflowStep.approver}
-                    </div>
-                  </div>
-                )}
-
-                {selectedWorkflowStep.parecer && (
-                  <div style={{ marginBottom: '16px' }}>
-                    <label style={{ 
-                      display: 'block',
-                      fontSize: '13px',
-                      fontWeight: '500',
-                      color: 'var(--secondary-text)',
-                      marginBottom: '4px'
-                    }}>
-                      Parecer
-                    </label>
-                    <div style={{ 
-                      fontSize: '14px',
-                      backgroundColor: 'var(--background)',
-                      padding: '12px',
-                      borderRadius: '4px',
-                      border: '1px solid var(--border-color)',
-                      whiteSpace: 'pre-wrap'
-                    }}>
-                      {selectedWorkflowStep.parecer}
-                    </div>
-                  </div>
-                )}
+              <div style={{ fontSize: '14px', color: 'var(--primary-text)', whiteSpace: 'pre-wrap', minHeight: '60px' }}>
+                {selectedWorkflowStep.parecer || 'Nenhum parecer registrado.'}
               </div>
-
-              <div style={{ 
-                display: 'flex', 
-                justifyContent: 'flex-end',
-                paddingTop: '16px',
-                borderTop: '1px solid var(--border-color)'
-              }}>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
                 <button
                   onClick={() => {
                     setShowWorkflowModal(false);

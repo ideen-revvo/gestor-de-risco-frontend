@@ -14,7 +14,8 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
     value_range: [0, 0],
     company_id: getGlobalCompanyId(),
     role_id: null,
-    type_id: null
+    type_id: null,
+    subordination: false
   };
 
   const [formData, setFormData] = useState(initialFormData);
@@ -32,7 +33,8 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
           value_range: initialData.value_range || [0, 0],
           company_id: initialData.company_id || getGlobalCompanyId(),
           role_id: initialData.role_id || null,
-          type_id: initialData.type_id || null
+          type_id: initialData.type_id || null,
+          subordination: initialData.subordination || false
         });
       } else {
         setFormData(initialFormData);
@@ -229,6 +231,30 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
                     </option>
                   ))}
                 </select>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="subordination"
+                  checked={formData.subordination}
+                  onChange={(e) => setFormData({ ...formData, subordination: e.target.checked })}
+                  className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                />
+                <label htmlFor="subordination" className="text-sm font-medium text-gray-700">
+                  Subordinação
+                </label>
+                <div className="relative group">
+                  <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 hidden group-hover:block">
+                    <div className="bg-gray-900 text-white text-xs rounded py-1 px-2 w-64">
+                      Indicará que os aprovadores poderão aprovar esta etapa com uma alçada superior, sem que a alçada atual ou abaixo tenha sido trabalhada.
+                    </div>
+                    <div className="border-4 border-transparent border-t-gray-900 absolute top-full left-1/2 transform -translate-x-1/2"></div>
+                  </div>
+                  <svg className="w-4 h-4 text-gray-400 cursor-help" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
               </div>
             </div>
             
