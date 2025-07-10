@@ -179,29 +179,39 @@ const DashboardFilter = ({ selectedCustomer }) => {
               id,
               name,
               company_code,
+              costumer_cnpj,
+              costumer_phone,
+              costumer_email,
               company:company_id (
                 id,
                 name
-              )
+              ),
+              address:addr_id(*)
             `)
             .eq('id', selectedCustomer)
             .single();
             
           if (error) throw error;
           
+          let addressString = '';
+          let cityString = '';
+          if (data.address && !Array.isArray(data.address)) {
+            const addr = data.address;
+            addressString = `${addr.street || ''}${addr.num ? ', ' + addr.num : ''}`.trim();
+            cityString = `${addr.city || ''}${addr.state ? ' - ' + addr.state : ''}${addr.zcode ? ', ' + addr.zcode : ''}`.trim();
+          }
+
           if (data) {
             setCustomerDetails({
               id: data.id,
               name: data.name,
               companyName: data.company?.name,
               companyCode: data.company_code,
-              cnpj: "12.345.678/0001-90",
-              address: "Av. Paulista, 1000 - Bela Vista",
-              city: "São Paulo - SP, 01310-100",
+              cnpj: data.costumer_cnpj,
+              address: addressString,
+              city: cityString,
               contacts: [
-                { name: "Maria Silva", phone: "(11) 98765-4321", email: "maria.silva@bellavita.com.br" },
-                { name: "João Santos", phone: "(11) 98765-4322", email: "joao.santos@bellavita.com.br" },
-                { name: "Ana Oliveira", phone: "(11) 98765-4323", email: "ana.oliveira@bellavita.com.br" }
+                { name: data.name, phone: data.costumer_phone, email: data.costumer_email }
               ]
             });
           }

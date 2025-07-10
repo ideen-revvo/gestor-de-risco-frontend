@@ -455,6 +455,8 @@ const BusinessAnalysis = () => {
     scoreVariation: 13
   });
   const [companyName, setCompanyName] = useState('');
+  const [customerData, setCustomerData] = useState(null);
+  const [customerAddress, setCustomerAddress] = useState('');
   const [isExpandedDetails, setIsExpandedDetails] = useState(false);
   const [creditLimit, setCreditLimit] = useState('');
   const [prepaidLimit, setPrepaidLimit] = useState('');
@@ -965,12 +967,54 @@ const BusinessAnalysis = () => {
   }, [selectedCustomer, corporateGroupId]);
 
   useEffect(() => {
-    const selectedRequest = JSON.parse(localStorage.getItem('selectedRequest'));
-    if (selectedRequest) {
-      setSelectedCustomer(selectedRequest.customer_id);
-      setCompanyName(selectedRequest.company_name);
-    }
-  }, []);
+    const fetchCustomerData = async () => {
+      if (!selectedCustomer) {
+        setCustomerData(null);
+        setCustomerAddress('');
+        return;
+      }
+      try {
+        const { data, error } = await supabase
+          .from('customer')
+          .select(`
+            id,
+            name,
+            costumer_email,
+            costumer_phone,
+            costumer_cnpj,
+            costumer_razao_social,
+            company_code,
+            addr_id
+          `)
+          .eq('id', selectedCustomer)
+          .single();
+        if (error) throw error;
+        setCustomerData(data);
+        // Buscar endereço se addr_id existir
+        if (data?.addr_id) {
+          const { data: addr, error: addrError } = await supabase
+            .from('address')
+            .select('*')
+            .eq('id', data.addr_id)
+            .single();
+          if (!addrError && addr) {
+            // Montar string do endereço
+            const addressString = `${addr.street || ''}${addr.num ? ', ' + addr.num : ''}${addr.compl ? ' - ' + addr.compl : ''}${addr.city ? ' - ' + addr.city : ''}${addr.state ? ' - ' + addr.state : ''}${addr.zcode ? ', ' + addr.zcode : ''}`.trim();
+            setCustomerAddress(addressString);
+          } else {
+            setCustomerAddress('');
+          }
+        } else {
+          setCustomerAddress('');
+        }
+      } catch (error) {
+        console.error('Erro ao buscar dados do cliente:', error);
+        setCustomerData(null);
+        setCustomerAddress('');
+      }
+    };
+    fetchCustomerData();
+  }, [selectedCustomer]);
 
   useEffect(() => {
     if (selectedCustomer) {
@@ -1047,7 +1091,7 @@ const BusinessAnalysis = () => {
             justifyContent: 'space-between',
             alignItems: 'center'
           }}>
-            <h2 style={{ fontSize: 20, fontWeight: 600, color: '#111827', marginBottom: 0 }}>Clínica Estética Bella Vita</h2>
+            <h2 style={{ fontSize: 20, fontWeight: 600, color: '#111827', marginBottom: 0 }}>{customerData?.name}</h2>
             <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }} onClick={() => setIsExpandedDetails(prev => !prev)}>
               <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ transform: isExpandedDetails ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
                 <path d="M5 8L10 13L15 8" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
@@ -1056,29 +1100,22 @@ const BusinessAnalysis = () => {
           </div>
           {isExpandedDetails && (
             <>
-              <div style={{ fontSize: 14, color: '#6B7280', marginTop: 0, marginBottom: 0 }}>Bella Vita Serviços Médicos e Estéticos Ltda</div>
-              <div style={{ fontSize: 14, color: '#6B7280', marginTop: 4 }}>Cód. 12345</div>
-              <a href="https://bellavita.com.br" target="_blank" rel="noopener noreferrer" className="website" style={{ fontSize: 14, color: '#2563EB', marginTop: 4, display: 'inline-block' }}>
-                bellavita.com.br
-              </a>
+              <div style={{ fontSize: 14, color: '#6B7280', marginTop: 0, marginBottom: 0 }}>Código: {customerData?.company_code}</div>
               <div className="content" style={{ display: 'flex', gap: 48, marginTop: 24 }}>
                 <div className="company-info" style={{ display: 'flex', gap: 48, flex: 1 }}>
                   <div className="info-field" style={{ flex: 1 }}>
                     <label style={{ display: 'block', fontSize: 13, color: '#6B7280', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase' }}>CNPJ</label>
-                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>12.345.678/0001-90</p>
+                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>{customerData?.costumer_cnpj}</p>
                   </div>
                   <div className="info-field" style={{ flex: 1 }}>
                     <label style={{ display: 'block', fontSize: 13, color: '#6B7280', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase' }}>Endereço</label>
-                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>Av. Paulista, 1000 - Bela Vista</p>
-                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>São Paulo - SP, 01310-100</p>
+                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>{customerAddress}</p>
                   </div>
                 </div>
                 <div className="contacts-section" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
                   <div className="contacts-scroll" style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 4, margin: -4, padding: 4 }}>
                     {[
-                      { name: 'Maria Silva', phone: '(11) 98765-4321', email: 'maria.silva@bellavita.com.br' },
-                      { name: 'João Santos', phone: '(11) 98765-4322', email: 'joao.santos@bellavita.com.br' },
-                      { name: 'Ana Oliveira', phone: '(11) 98765-4323', email: 'ana.oliveira@bellavita.com.br' }
+                      { name: customerData?.name, phone: customerData?.costumer_phone, email: customerData?.costumer_email }
                     ].map((contact, index) => (
                       <div className="contact-card" key={index} style={{ minWidth: 260, background: '#F9FAFB', padding: 16, borderRadius: 6 }}>
                         <div className="name" style={{ fontSize: 14, fontWeight: 500, color: '#111827', marginBottom: 12 }}>{contact.name}</div>

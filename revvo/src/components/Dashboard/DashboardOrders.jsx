@@ -1264,7 +1264,7 @@ const DashboardOrders = ({
                     {selectedDetailCard.status ? 'Solicitado por:' : 'Condição de pagamento'}
                   </div>
                   <div style={{ fontSize: '13px', color: 'var(--secondary-text)' }}>
-                    nomedoconsultor@silimed.com.br
+                    {selectedDetailCard.email_solicitante || 'N/A'}
                   </div>
                 </div>
                 <div className='items-section' style={{ marginBottom: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
