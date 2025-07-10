@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import { 
   House, List, CurrencyDollar, ShoppingCart, Gear, ChartLine,
   CaretDown, Question, Bell, User, 
-  Envelope, SignOut, Clock
+  Envelope, SignOut, Clock, Package
 } from '@phosphor-icons/react';
 import { Eye } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
@@ -248,6 +248,29 @@ const Sidebar = ({
                 transition: 'transform 0.3s ease'
               }}
             />
+          </li>
+        </ul>
+
+        <ul>
+          <li 
+            className={currentPage === 'sap-sales-orders' ? 'active' : ''}
+            onClick={() => {
+              setCurrentPage('sap-sales-orders');
+              setIsSidebarOpen(false);
+            }}
+          >
+            <Package size={16} />
+            Ordens de Venda
+          </li>
+          <li 
+            className={currentPage === 'sap-invoices' ? 'active' : ''}
+            onClick={() => {
+              setCurrentPage('sap-invoices');
+              setIsSidebarOpen(false);
+            }}
+          >
+            <CurrencyDollar size={16} />
+            Faturas
           </li>
         </ul>
         
