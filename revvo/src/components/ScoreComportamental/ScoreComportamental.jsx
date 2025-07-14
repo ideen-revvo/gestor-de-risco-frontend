@@ -6,6 +6,7 @@ import { ModelComparison } from './ModelComparison';
 import { ModelEditModal } from './ModelEditModal';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ErrorMessage } from './ErrorMessage';
+import { apiService } from '../../services/api.js';
 
 const Container = styled.div`
   
@@ -66,7 +67,7 @@ const TabContainer = styled.div`
 
 const Tab = styled.button`
   flex: 1;
-  padding: 12px 24px;
+  padding: 0px 24px;
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -222,10 +223,33 @@ export function ScoreComportamental() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const handleNewModel = (newModel) => {
-    // In a real app, this would save to a database
-    console.log('Novo modelo criado:', newModel);
-    setIsNewModelModalOpen(false);
+  const handleNewModel = async (newModel) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [insertedModel] = await apiService.supabaseInsert('score_models', [{
+        name: newModel.name,
+        description: newModel.description,
+        frequencia_calculo: newModel.frequenciaCalculo,
+        model_type: newModel.modelType,
+        final_score: newModel.finalScore,
+        ks_score: newModel.ksScore
+      }]);
+      if (insertedModel && newModel.variables && newModel.variables.length > 0) {
+        const variablesToInsert = newModel.variables.map(v => ({
+          model_id: insertedModel.id,
+          name: v.name,
+          weight: v.weight,
+          score: v.score ?? null
+        }));
+        await apiService.supabaseInsert('score_model_variables', variablesToInsert);
+      }
+      setIsNewModelModalOpen(false);
+    } catch (err) {
+      setError('Erro ao salvar modelo: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUpdateChampion = (updatedModel) => {
