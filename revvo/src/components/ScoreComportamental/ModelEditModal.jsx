@@ -264,18 +264,20 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
     let processedVariables = variables;
     let finalScore = 0;
-    
+    // Converter peso de % para decimal
+    processedVariables = variables.map(v => ({
+      ...v,
+      weight: v.weight > 1 ? v.weight / 100 : v.weight
+    }));
     if (modelType === 'scorecard') {
       // Normalize weights to sum to 1 for scorecard
-      const totalWeight = variables.reduce((sum, v) => sum + Math.abs(v.weight), 0);
-      processedVariables = variables.map(v => ({
+      const totalWeight = processedVariables.reduce((sum, v) => sum + Math.abs(v.weight), 0);
+      processedVariables = processedVariables.map(v => ({
         ...v,
         weight: totalWeight > 0 ? v.weight / totalWeight : 0
       }));
-      
       // Calculate final score for scorecard
       finalScore = processedVariables.reduce(
         (sum, v) => sum + v.weight * (v.score || 0),
@@ -283,17 +285,14 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
       );
     } else {
       // For Score Linear Ponderado, don't normalize weights and calculate differently
-      processedVariables = variables;
-      finalScore = variables.reduce((sum, v) => sum + v.weight, 0);
+      finalScore = processedVariables.reduce((sum, v) => sum + v.weight, 0);
     }
-
     // Create mock KS distribution data for new models
     const mockDistributionData = !model ? [
       { score: 300, goodCumulative: 0.1, badCumulative: 0.3 },
       { score: 500, goodCumulative: 0.5, badCumulative: 0.7 },
       { score: 800, goodCumulative: 1.0, badCumulative: 1.0 },
     ] : model.distributionData;
-
     onSave({
       ...formData,
       variables: processedVariables,
@@ -431,8 +430,6 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
                         value={variable.weight}
                         onChange={(e) => handleVariableChange(index, 'weight', e.target.value)}
                         step="0.01"
-                        min={modelType === 'scorecard' ? "0" : undefined}
-                        max={modelType === 'scorecard' ? "1" : undefined}
                         required
                       />
                     </FormGroup>

@@ -4,6 +4,7 @@ import styled from 'styled-components';
 import { Table } from './Table';
 import { KSChart } from './KSChart';
 import { ModelEditModal } from './ModelEditModal';
+import { ScoreService } from '../../services/scoreService.js';
 
 const Container = styled.div`
   display: flex;
@@ -88,10 +89,22 @@ const Card = styled.div`
 
 export function ModelDetails({ data, title, onUpdate }) {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  const handleSave = (updatedModel) => {
-    onUpdate?.(updatedModel);
-    setIsEditModalOpen(false);
+  const handleSave = async (updatedModel) => {
+    setLoading(true);
+    setError(null);
+    try {
+      // Atualiza no banco
+      await ScoreService.updateModelAndVariables(updatedModel);
+      onUpdate?.(updatedModel);
+      setIsEditModalOpen(false);
+    } catch (err) {
+      setError('Erro ao atualizar modelo: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -106,12 +119,13 @@ export function ModelDetails({ data, title, onUpdate }) {
           Editar Modelo
         </button>
       </Header>
-      
+      {error && <div style={{ color: 'red', marginBottom: 8 }}>{error}</div>}
       <ModelEditModal
         isOpen={isEditModalOpen}
         onClose={() => setIsEditModalOpen(false)}
         model={data}
         onSave={handleSave}
+        loading={loading}
       />
       
       <GridContainer>
