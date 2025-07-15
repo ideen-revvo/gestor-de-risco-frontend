@@ -7,6 +7,7 @@ import { ModelEditModal } from './ModelEditModal';
 import { LoadingSpinner } from './LoadingSpinner';
 import { ErrorMessage } from './ErrorMessage';
 import { apiService } from '../../services/api.js';
+import { ScoreService } from '../../services/scoreService.js';
 
 const Container = styled.div`
   
@@ -216,12 +217,38 @@ const mockChallengerModel = {
 };
 
 export function ScoreComportamental() {
+  const [modelos, setModelos] = useState([]);
+  const [modeloSelecionado, setModeloSelecionado] = useState(null);
   const [activeTab, setActiveTab] = useState('champion');
   const [isNewModelModalOpen, setIsNewModelModalOpen] = useState(false);
   const [championModel, setChampionModel] = useState(mockChampionModel);
   const [challengerModel, setChallengerModel] = useState(mockChallengerModel);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function fetchModelos() {
+      setLoading(true);
+      try {
+        const result = await ScoreService.getAllModels();
+        setModelos(result);
+        if (result && result.length > 0) {
+          setModeloSelecionado(result[0]);
+        }
+      } catch (err) {
+        setError('Erro ao buscar modelos: ' + (err.message || err));
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchModelos();
+  }, []);
+
+  const handleSelectModelo = (e) => {
+    const id = e.target.value;
+    const found = modelos.find(m => String(m.id) === String(id));
+    setModeloSelecionado(found);
+  };
 
   const handleNewModel = async (newModel) => {
     setLoading(true);
@@ -252,6 +279,16 @@ export function ScoreComportamental() {
     }
   };
 
+  const handleUpdateModelo = async (updatedModel) => {
+    // Atualiza lista local
+    setModelos(prev => prev.map(m => m.id === updatedModel.id ? { ...m, ...updatedModel } : m));
+    setModeloSelecionado(prev => prev && prev.id === updatedModel.id ? { ...prev, ...updatedModel } : prev);
+    // Opcional: recarregar do banco para garantir consistência
+    // const result = await ScoreService.getAllModels();
+    // setModelos(result);
+    // setModeloSelecionado(result.find(m => m.id === updatedModel.id));
+  };
+
   const handleUpdateChampion = (updatedModel) => {
     setChampionModel(updatedModel);
   };
@@ -263,34 +300,28 @@ export function ScoreComportamental() {
   const renderContent = () => {
     if (loading) return <LoadingSpinner />;
     if (error) return <ErrorMessage message={error} />;
-
-    switch (activeTab) {
-      case 'champion':
-        return (
-          <ModelDetails
-            data={championModel}
-            title="Modelo Champion"
-            onUpdate={handleUpdateChampion}
-          />
-        );
-      case 'challenger':
-        return (
-          <ModelDetails
-            data={challengerModel}
-            title="Modelo Challenger"
-            onUpdate={handleUpdateChallenger}
-          />
-        );
-      case 'comparison':
-        return (
-          <ModelComparison
-            champion={championModel}
-            challenger={challengerModel}
-          />
-        );
-      default:
-        return null;
+    if (modeloSelecionado) {
+      return (
+        <ModelDetails
+          data={{
+            ...modeloSelecionado,
+            variables: modeloSelecionado.variables || [],
+            finalScore: modeloSelecionado.final_score || modeloSelecionado.finalScore || 0,
+            ksScore: modeloSelecionado.ks_score || modeloSelecionado.ksScore || 0,
+            distributionData: modeloSelecionado.distributionData || []
+          }}
+          title={modeloSelecionado.name}
+          onUpdate={handleUpdateModelo}
+        />
+      );
     }
+    // fallback mock
+    return (
+      <ModelDetails
+        data={championModel}
+        title="Modelo Champion (Mock)"
+      />
+    );
   };
 
   return (
@@ -307,6 +338,16 @@ export function ScoreComportamental() {
           </button>
         </div>
       </Header>
+      {/* Select de modelos */}
+      <div style={{ marginBottom: 24, maxWidth: 400 }}>
+        <label style={{ fontWeight: 500, marginRight: 8 }}>Selecione o Modelo:</label>
+        <select value={modeloSelecionado?.id || ''} onChange={handleSelectModelo} style={{ width: 160, padding: 0, borderRadius: 4, border: '1px solid #ccc' }}>
+          {modelos.length === 0 && <option value="">Nenhum modelo encontrado</option>}
+          {modelos.map(m => (
+            <option key={m.id} value={m.id}>{m.name}</option>
+          ))}
+        </select>
+      </div>
 
       <StatsGrid>
         <StatCard>
@@ -352,18 +393,18 @@ export function ScoreComportamental() {
         >
           Modelo Champion
         </Tab>
-        <Tab
+        {/* <Tab
           className={activeTab === 'challenger' ? 'active' : ''}
           onClick={() => setActiveTab('challenger')}
         >
           Modelo Challenger
-        </Tab>
-        <Tab
+        </Tab> */}
+        {/* <Tab
           className={activeTab === 'comparison' ? 'active' : ''}
           onClick={() => setActiveTab('comparison')}
         >
           Comparativo
-        </Tab>
+        </Tab> */}
       </TabContainer>
 
       <ContentArea>

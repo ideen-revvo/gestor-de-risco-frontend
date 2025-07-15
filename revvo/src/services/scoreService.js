@@ -220,5 +220,72 @@ export const ScoreService = {
       previousScore,
       scoreVariation
     };
+  },
+
+  /**
+   * Busca todos os modelos de score do banco, incluindo variáveis.
+   */
+  async getAllModels() {
+    try {
+      // Buscar todos os modelos
+      const models = await apiService.supabaseSelect('score_models', {
+        select: '*',
+        order: { column: 'created_at', ascending: false }
+      });
+      if (!models || models.length === 0) return [];
+      // Buscar variáveis de todos os modelos
+      const modelIds = models.map(m => m.id);
+      const variables = await apiService.supabaseSelect('score_model_variables', {
+        select: '*',
+        in: { model_id: modelIds }
+      });
+      // Agrupar variáveis por modelo
+      const variablesByModel = {};
+      variables.forEach(v => {
+        if (!variablesByModel[v.model_id]) variablesByModel[v.model_id] = [];
+        variablesByModel[v.model_id].push(v);
+      });
+      // Montar estrutura final
+      return models.map(model => ({
+        ...model,
+        variables: variablesByModel[model.id] || []
+      }));
+    } catch (error) {
+      console.error('Erro ao buscar modelos de score:', error);
+      return [];
+    }
+  },
+
+  /**
+   * Atualiza um modelo e suas variáveis no banco.
+   * @param {object} model Modelo com id, campos e variáveis (array)
+   */
+  async updateModelAndVariables(model) {
+    try {
+      // Atualizar modelo
+      await apiService.supabaseUpdate('score_models', {
+        name: model.name,
+        description: model.description,
+        frequencia_calculo: model.frequencia_calculo,
+        model_type: model.model_type,
+        final_score: model.finalScore ?? model.final_score,
+        ks_score: model.ksScore ?? model.ks_score
+      }, { id: model.id });
+      // Atualizar variáveis (simples: deleta todas e insere as novas)
+      await apiService.supabaseDelete('score_model_variables', { model_id: model.id });
+      if (model.variables && model.variables.length > 0) {
+        const variablesToInsert = model.variables.map(v => ({
+          model_id: model.id,
+          name: v.name,
+          weight: v.weight,
+          score: v.score ?? null
+        }));
+        await apiService.supabaseInsert('score_model_variables', variablesToInsert);
+      }
+      return true;
+    } catch (error) {
+      console.error('Erro ao atualizar modelo:', error);
+      throw error;
+    }
   }
 };
