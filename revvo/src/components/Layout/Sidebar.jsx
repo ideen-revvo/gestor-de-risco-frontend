@@ -250,30 +250,6 @@ const Sidebar = ({
             />
           </li>
         </ul>
-
-        {/* <ul>
-          <li 
-            className={currentPage === 'sap-sales-orders' ? 'active' : ''}
-            onClick={() => {
-              setCurrentPage('sap-sales-orders');
-              setIsSidebarOpen(false);
-            }}
-          >
-            <Package size={16} />
-            Ordens de Venda
-          </li>
-          <li 
-            className={currentPage === 'sap-invoices' ? 'active' : ''}
-            onClick={() => {
-              setCurrentPage('sap-invoices');
-              setIsSidebarOpen(false);
-            }}
-          >
-            <CurrencyDollar size={16} />
-            Faturas
-          </li>
-        </ul> */}
-        
         <ul className="submenu" style={{ display: isConfigOpen ? 'block' : 'none' }}>
           <li 
             className={currentPage === 'profiles' ? 'active' : ''}
@@ -330,6 +306,31 @@ const Sidebar = ({
             Sair
           </li>
         </ul>
+
+        <ul>
+          <li 
+            className={currentPage === 'sap-sales-orders' ? 'active' : ''}
+            onClick={() => {
+              setCurrentPage('sap-sales-orders');
+              setIsSidebarOpen(false);
+            }}
+          >
+            <Package size={16} />
+            Ordens de Venda
+          </li>
+          <li 
+            className={currentPage === 'sap-invoices' ? 'active' : ''}
+            onClick={() => {
+              setCurrentPage('sap-invoices');
+              setIsSidebarOpen(false);
+            }}
+          >
+            <CurrencyDollar size={16} />
+            Faturas
+          </li>
+        </ul>
+        
+        
       </SidebarContainer>
     </>
   );

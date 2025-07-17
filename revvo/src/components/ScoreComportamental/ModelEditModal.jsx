@@ -168,7 +168,7 @@ const ButtonGroup = styled.div`
   }
 
   .cancel-button {
-    padding: 8px 16px;
+    padding: 0px 16px;
     background: white;
     color: var(--secondary-text);
     border: 1px solid var(--border-color);
@@ -182,7 +182,7 @@ const ButtonGroup = styled.div`
   }
 
   .save-button {
-    padding: 8px 16px;
+    padding: 0px 16px;
     background: var(--primary-blue);
     color: white;
     border: none;
@@ -200,6 +200,7 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
   const [formData, setFormData] = useState(model || {
     name: '',
     description: '',
+    frequenciaCalculo: '', // ADICIONADO
     modelType: 'scorecard', // Default to scorecard
     variables: [],
     finalScore: 0,
@@ -337,6 +338,42 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
             </FormGroup>
 
             <FormGroup>
+            <label style={{ 
+                fontSize: '16px', 
+                fontWeight: '600', 
+                color: 'var(--primary-text)',
+                marginBottom: '8px',
+                display: 'block'
+              }}>
+                Frequência de Cálculo
+              </label>
+              <select
+                value={formData.frequenciaCalculo || ''}
+                onChange={e => handleInputChange('frequenciaCalculo', e.target.value)}
+                required
+                style={{
+                  width: '100%',
+                  padding: '12px',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '4px',
+                  fontSize: '14px',
+                  backgroundColor: 'white',
+                  fontWeight: '500',
+                  color: 'var(--primary-text)',
+                  height: 'auto'
+                }}
+              >
+                <option value="" disabled>Selecione...</option>
+                <option value="mensal">Mensal</option>
+                <option value="bimestral">Bimestral</option>
+                <option value="trimestral">Trimestral</option>
+                <option value="semestral">Semestral</option>
+                <option value="anual">Anual</option>
+                <option value="manual">Manual (por solicitação do usuário)</option>
+              </select>
+            </FormGroup>
+
+            <FormGroup>
               <label style={{ 
                 fontSize: '16px', 
                 fontWeight: '600', 
@@ -401,7 +438,7 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
                     </FormGroup>
                     {modelType === 'scorecard' && (
                       <FormGroup style={{ marginBottom: 0 }}>
-                      <label>Score</label>
+                      <label>Pontuação</label>
                       <input
                         type="number"
                         value={variable.score}
