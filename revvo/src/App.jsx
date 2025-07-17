@@ -31,8 +31,8 @@ import UserProfiles from './components/UserProfiles/UserProfiles';
 import HistoricoLimites from './components/HistoricoLimites/HistoricoLimites';
 import AlertasExternos from './components/AlertasExternos/AlertasExternos';
 import ScoreComportamental from './components/ScoreComportamental/ScoreComportamental';
-import SapSalesOrders from './components/Sap/SapSalesOrders';
-import SapInvoices from './components/Sap/SapInvoices';
+// import SapSalesOrders from './components/Sap/SapSalesOrders';
+// import SapInvoices from './components/Sap/SapInvoices';
 
 // Estilos
 import './App.css';
@@ -576,10 +576,10 @@ function App() {
         <AlertasExternos />
       ) : currentPage === 'score-comportamental' ? (
         <ScoreComportamental />
-      ) : currentPage === 'sap-sales-orders' ? (
-        <SapSalesOrders />
-      ) : currentPage === 'sap-invoices' ? (
-        <SapInvoices />
+      // ) : currentPage === 'sap-sales-orders' ? (
+      //   <SapSalesOrders />
+      // ) : currentPage === 'sap-invoices' ? (
+      //   <SapInvoices />
       ) : currentPage === 'home' ? (
         <>
           {selectedSalesOrder ? (
