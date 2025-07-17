@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import Select from 'react-select';
 import { X } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase';
+import { inviteUser } from '../../services/inviteUserService';
 
 const Overlay = styled.div`
   position: fixed; top: 0; left: 0; right: 0; bottom: 0;
@@ -31,31 +32,15 @@ export default function InviteUserModal({ roles, onClose, onSuccess, companyId }
     e.preventDefault();
     setLoading(true); setError(null);
     try {
-      // Obter o access_token do usuário autenticado
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session?.access_token) {
-        throw new Error('Sessão de usuário não encontrada. Faça login novamente.');
-      }
-      const response = await fetch('https://vpnusoaiqtuqihkstgzt.supabase.co/functions/v1/invite-user', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session.access_token}`
-        },
-        body: JSON.stringify({
-          email: form.email,
-          password: 'SenhaProvisoria123!', // ou gere uma senha aleatória se preferir
-          user_metadata: {
-            name: form.name,
-            doc_id: form.doc_id,
-            birth_date: form.birth_date,
-            company_id: companyId,
-            role_id: form.role_id
-          }
-        })
+      await inviteUser({
+        email: form.email,
+        name: form.name,
+        doc_id: form.doc_id,
+        birth_date: form.birth_date,
+        company_id: companyId,
+        role_id: form.role_id,
+        password: 'SenhaProvisoria123!'
       });
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Erro ao convidar usuário.');
       if (onSuccess) onSuccess();
       onClose();
     } catch (err) {

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getGlobalCompanyId } from '../lib/globalState';
+import { createRole } from '../services/userRoleService';
 
 const UserRoleModal = ({ isOpen, onClose, onSave }) => {
   const [formData, setFormData] = useState({
@@ -15,17 +16,11 @@ const UserRoleModal = ({ isOpen, onClose, onSave }) => {
     setLoading(true);
 
     try {
-      const { error } = await supabase
-        .from('user_role')
-        .insert([
-          {
-            name: formData.name,
-            description: formData.description,
-            company_id: getGlobalCompanyId()
-          }
-        ]);
-
-      if (error) throw error;
+      await createRole({
+        name: formData.name,
+        description: formData.description,
+        company_id: getGlobalCompanyId()
+      });
       
       setFormData({ name: '', description: '' });
       onSave();

@@ -260,7 +260,10 @@ export function ScoreComportamental() {
         frequencia_calculo: newModel.frequenciaCalculo,
         model_type: newModel.modelType,
         final_score: newModel.finalScore,
-        ks_score: newModel.ksScore
+        ks_score: newModel.ksScore,
+        target_nome: newModel.target_nome,
+        target_operador: newModel.target_operador,
+        target_valor: newModel.target_valor
       }]);
       if (insertedModel && newModel.variables && newModel.variables.length > 0) {
         const variablesToInsert = newModel.variables.map(v => ({

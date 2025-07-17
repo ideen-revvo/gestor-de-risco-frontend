@@ -33,6 +33,10 @@ import AlertasExternos from './components/AlertasExternos/AlertasExternos';
 import ScoreComportamental from './components/ScoreComportamental/ScoreComportamental';
 // import SapSalesOrders from './components/Sap/SapSalesOrders';
 // import SapInvoices from './components/Sap/SapInvoices';
+import { CustomerService } from './services/customerService';
+import { getCorporateGroupId, listCompaniesByCorporateGroup, getMonthlyBilling } from './services/companyService';
+import { listSalesOrders } from './services/salesOrderService';
+import { listOrderDetails } from './services/orderDetailsService';
 
 // Estilos
 import './App.css';
@@ -242,12 +246,7 @@ function App() {
   useEffect(() => {
     async function loadCustomers() {
       try {
-        const { data, error } = await supabase
-          .from('customer')
-          .select('id, name')
-          .order('name', { ascending: true });
-
-        if (error) throw error;
+        const data = await CustomerService.listCustomers();
         setCustomers(data || []);
       } catch (error) {
         console.error('Error loading customers:', error);
@@ -263,42 +262,12 @@ function App() {
   useEffect(() => {
     async function loadSalesOrders() {
       try {
-        const { data: companyData } = await supabase
-          .from('company')
-          .select('corporate_group_id')
-          .eq('id', companyId)
-          .single();
-
-        if (companyData?.corporate_group_id) {
-          const { data: companiesData } = await supabase
-            .from('company')
-            .select('id')
-            .eq('corporate_group_id', companyData.corporate_group_id);
-
+        const corporateGroupId = await getCorporateGroupId(companyId);
+        if (corporateGroupId) {
+          const companiesData = await listCompaniesByCorporateGroup(corporateGroupId);
           if (companiesData?.length > 0) {
             const companyIds = companiesData.map(c => c.id);
-            
-            let query = supabase
-              .from('sale_orders')
-              .select(`
-                id,
-                created_at,
-                customer_id,
-                customer:customer_id(id, name),
-                total_qtt,
-                total_amt, 
-                due_date
-              `)
-              .in('company_id', companyIds)
-              .order('created_at', { ascending: false });
-              
-            if (selectedCustomer) {
-              query = query.eq('customer_id', selectedCustomer);
-            }
-            
-            const { data: ordersData, error } = await query;
-
-            if (error) throw error;
+            const ordersData = await listSalesOrders(companyIds, selectedCustomer);
             setSalesOrders(ordersData || []);
           }
         }
@@ -306,49 +275,27 @@ function App() {
         console.error('Error loading sales orders:', error);
       }
     }
-
     loadSalesOrders();
   }, [companyId, selectedCustomer]);
 
   useEffect(() => {
     async function loadMonthlyBilling() {
       try {
-        // Definir o período de 13 meses
-        const startDate = new Date();
-        startDate.setMonth(startDate.getMonth() - 12);
-        startDate.setDate(1);
-        const endDate = new Date();
-        endDate.setDate(1);
-
-        // Buscar corporate_group_id
-        const { data: companyData } = await supabase
-          .from('company')
-          .select('corporate_group_id')
-          .eq('id', companyId)
-          .single();
-
-        if (companyData?.corporate_group_id) {
-          let query = supabase
-            .from('vw_faturamento_mensal')
-            .select('*')
-            .eq('corporate_group_id', companyData.corporate_group_id);
-
-          if (selectedCustomer) {
-            query = query.eq('customer_id', selectedCustomer);
-          }
-
-          const { data: billingData, error } = await query;
-
-          if (error) throw error;
-
+        const corporateGroupId = await getCorporateGroupId(companyId);
+        if (corporateGroupId) {
+          const billingData = await getMonthlyBilling(corporateGroupId, selectedCustomer);
           // Criar array com todos os meses do período
+          const startDate = new Date();
+          startDate.setMonth(startDate.getMonth() - 12);
+          startDate.setDate(1);
+          const endDate = new Date();
+          endDate.setDate(1);
           const allMonths = [];
           const currentDate = new Date(startDate);
           while (currentDate <= endDate) {
             allMonths.push(format(currentDate, 'yyyy-MM'));
             currentDate.setMonth(currentDate.getMonth() + 1);
           }
-
           // Inicializar todos os meses com zero
           const groupedData = {};
           allMonths.forEach(month => {
@@ -357,7 +304,6 @@ function App() {
               total_faturado: 0
             };
           });
-
           // Preencher com dados reais onde existirem
           billingData?.forEach(item => {
             const monthKey = format(new Date(item.month), 'yyyy-MM');
@@ -365,7 +311,6 @@ function App() {
               groupedData[monthKey].total_faturado += parseFloat(item.total_faturado) || 0;
             }
           });
-
           // Converter para array e formatar para o gráfico
           const processedData = Object.values(groupedData)
             .sort((a, b) => a.month.localeCompare(b.month))
@@ -373,7 +318,6 @@ function App() {
               month: format(new Date(item.month + '-01'), 'MMM'),
               value: item.total_faturado
             }));
-
           setMonthlyBilling(processedData);
         }
       } catch (error) {
@@ -381,20 +325,13 @@ function App() {
         setMonthlyBilling([]);
       }
     }
-
     loadMonthlyBilling();
   }, [companyId, selectedCustomer]);
 
   useEffect(() => {
     async function loadOrderDetails() {
       try {
-        let { data, error } = await supabase
-          .from('vw_detalhes_pedidos_faturas')
-          .select('*')
-          .order('pedido_data', { ascending: false });
-
-        if (error) throw error;
-        
+        const data = await listOrderDetails();
         // Group parcelas by pedido
         const groupedData = data.reduce((acc, curr) => {
           const existing = acc.find(item => item.numero_pedido === curr.numero_pedido);
@@ -410,7 +347,6 @@ function App() {
             }
             return acc;
           }
-          
           const newOrder = {
             ...curr,
             parcelas: curr.num_parcela ? [{
@@ -422,13 +358,11 @@ function App() {
           };
           return [...acc, newOrder];
         }, []);
-
         setOrderDetails(groupedData || []);
       } catch (error) {
         console.error('Error loading order details:', error);
       }
     }
-
     loadOrderDetails();
   }, []);
 

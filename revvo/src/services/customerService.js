@@ -95,5 +95,55 @@ export const CustomerService = {
       eq: { id },
       single: true
     });
+  },
+
+  // Busca lista de clientes (id, name) ordenados por nome
+  async listCustomers() {
+    const { data, error } = await apiService.supabaseSelect('customer', {
+      select: 'id, name',
+      order: { column: 'name', ascending: true }
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  // Busca detalhes completos de um cliente (incluindo company e address)
+  async getCustomerDetails(customerId) {
+    const { data, error } = await apiService.supabaseSelect('customer', {
+      select: `
+        id,
+        name,
+        company_code,
+        costumer_cnpj,
+        costumer_phone,
+        costumer_email,
+        company:company_id(id, name),
+        address:addr_id(*)
+      `,
+      eq: { id: customerId },
+      single: true
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  // Busca detalhes completos de um cliente (incluindo address) para NewLimitOrder
+  async getCustomerDetailsWithAddress(customerId) {
+    const { data, error } = await apiService.supabaseSelect('customer', {
+      select: `
+        id,
+        name,
+        company_code,
+        costumer_email,
+        costumer_phone,
+        costumer_cnpj,
+        costumer_razao_social,
+        address:addr_id(*)
+      `,
+      eq: { id: customerId },
+      single: true
+    });
+    if (error) throw error;
+    return data;
   }
 };

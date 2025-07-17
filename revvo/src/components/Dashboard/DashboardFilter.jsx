@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import styled from 'styled-components';
 import { ChevronDown } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { CustomerService } from '../../services/customerService';
 
 const SearchBar = styled.div`
   margin: 24px 0;
@@ -173,26 +174,7 @@ const DashboardFilter = ({ selectedCustomer }) => {
     async function fetchCustomerDetails() {
       if (selectedCustomer) {
         try {
-          const { data, error } = await supabase
-            .from('customer')
-            .select(`
-              id,
-              name,
-              company_code,
-              costumer_cnpj,
-              costumer_phone,
-              costumer_email,
-              company:company_id (
-                id,
-                name
-              ),
-              address:addr_id(*)
-            `)
-            .eq('id', selectedCustomer)
-            .single();
-            
-          if (error) throw error;
-          
+          const data = await CustomerService.getCustomerDetails(selectedCustomer);
           let addressString = '';
           let cityString = '';
           if (data.address && !Array.isArray(data.address)) {
@@ -200,7 +182,6 @@ const DashboardFilter = ({ selectedCustomer }) => {
             addressString = `${addr.street || ''}${addr.num ? ', ' + addr.num : ''}`.trim();
             cityString = `${addr.city || ''}${addr.state ? ' - ' + addr.state : ''}${addr.zcode ? ', ' + addr.zcode : ''}`.trim();
           }
-
           if (data) {
             setCustomerDetails({
               id: data.id,
@@ -223,7 +204,6 @@ const DashboardFilter = ({ selectedCustomer }) => {
         setCustomerDetails(null);
       }
     }
-    
     fetchCustomerDetails();
   }, [selectedCustomer]);
   

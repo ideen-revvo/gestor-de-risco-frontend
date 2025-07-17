@@ -5,6 +5,7 @@ import { FunnelSimple, CaretDown, CaretUp, Clock, CheckCircle } from '@phosphor-
 import { supabase } from '../../lib/supabase';
 import RequestDetails from './RequestDetails';
 import NewLimitOrder from './NewLimitOrder';
+import { getCreditLimitRequests } from '../../services/creditLimitService';
 
 const Container = styled.div`
   padding: 24px;
@@ -217,41 +218,20 @@ const MySolicitations = () => {
 
   useEffect(() => {
     async function fetchRequests() {
-      // Não fazer a consulta se não tivermos o company_id do usuário
       if (!userCompanyId) return;
-      
-      let query = supabase
-        .from('credit_limit_request')
-        .select(`
-          *,
-          customer:customer_id(id, name, company_code),
-          company:company_id(name),
-          classification:silim_classific_id(name),
-          payment_method:silim_meio_pgto_id(name),
-          branch:branch_id(name),
-          status:status_id(name)
-        `)
-        .eq('company_id', userCompanyId) // Alterado de user_id para company_id
-        .order('created_at', { ascending: false });
-
-      if (filterStatus) {
-        query = query.eq('status_id', filterStatus);
-      }
-      if (filterStartDate) {
-        query = query.gte('created_at', filterStartDate);
-      }
-      if (filterEndDate) {
-        query = query.lte('created_at', filterEndDate + 'T23:59:59');
-      }
-
-      const { data, error } = await query;
-
-      if (!error && data) {
+      try {
+        const data = await getCreditLimitRequests({
+          companyId: userCompanyId,
+          statusId: filterStatus,
+          startDate: filterStartDate,
+          endDate: filterEndDate
+        });
         setRequests(data);
+      } catch (error) {
+        console.error('Erro ao buscar solicitações:', error);
       }
       setLoading(false);
     }
-
     fetchRequests();
   }, [userCompanyId, filterStatus, filterStartDate, filterEndDate]);
 

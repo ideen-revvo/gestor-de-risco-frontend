@@ -4,6 +4,8 @@ import { supabase } from '../lib/supabase';
 import { getGlobalCompanyId } from '../lib/globalState';
 import WorkflowRuleModal from './WorkflowRuleModal';
 import UserRoleModal from './UserRoleModal';
+import { listWorkflowRules } from '../services/workflowRuleService';
+import { listRoles } from '../services/userRoleService';
 
 const WorkflowRules = () => {
   const [isWorkflowModalOpen, setIsWorkflowModalOpen] = useState(false);
@@ -20,23 +22,7 @@ const WorkflowRules = () => {
 
   async function loadRules() {
     try {
-      const { data, error } = await supabase
-        .from('workflow_rules')
-        .select(`
-          *,
-          workflow_type:type_id (
-            id,
-            name
-          ),
-          user_role:role_id (
-            id,
-            name
-          )
-        `)
-        .eq('company_id', getGlobalCompanyId())
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
+      const data = await listWorkflowRules(getGlobalCompanyId());
       setRules(data || []);
     } catch (error) {
       console.error('Error loading workflow rules:', error);
@@ -47,13 +33,7 @@ const WorkflowRules = () => {
 
   async function loadRoles() {
     try {
-      const { data, error } = await supabase
-        .from('user_role')
-        .select('id, name')
-        .eq('company_id', getGlobalCompanyId())
-        .order('name');
-
-      if (error) throw error;
+      const data = await listRoles(getGlobalCompanyId());
       setRoles(data || []);
     } catch (error) {
       console.error('Error loading roles:', error);
