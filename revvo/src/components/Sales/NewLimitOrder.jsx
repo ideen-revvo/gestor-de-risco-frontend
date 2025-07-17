@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { mockCustomers } from './mockData';
 import Select from 'react-select';
 import styled from 'styled-components';
 import { CurrencyDollar, User, Building, Phone, Envelope, X, CaretDown, CaretUp } from '@phosphor-icons/react';

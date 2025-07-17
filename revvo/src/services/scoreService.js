@@ -54,27 +54,6 @@ export const ScoreService = {
     }
   },
 
-  getMockData() {
-    // Dados mock consistentes para 13 meses
-    const mockData = [
-      { month: 'Jun', paymentTerm: 35, score: 782 },
-      { month: 'Jul', paymentTerm: 32, score: 795 },
-      { month: 'Ago', paymentTerm: 30, score: 810 },
-      { month: 'Set', paymentTerm: 28, score: 825 },
-      { month: 'Out', paymentTerm: 31, score: 815 },
-      { month: 'Nov', paymentTerm: 29, score: 830 },
-      { month: 'Dez', paymentTerm: 27, score: 840 },
-      { month: 'Jan', paymentTerm: 26, score: 848 },
-      { month: 'Fev', paymentTerm: 28, score: 842 },
-      { month: 'Mar', paymentTerm: 30, score: 835 },
-      { month: 'Abr', paymentTerm: 32, score: 828 },
-      { month: 'Mai', paymentTerm: 29, score: 837 },
-      { month: 'Jun', paymentTerm: 25, score: 850 }
-    ];
-
-    return mockData;
-  },
-
   processPaymentTermData(saleOrders) {
     const endDate = new Date();
     const months = [];

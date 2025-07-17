@@ -401,7 +401,7 @@ const FinancialAnalysisContainer = styled.div`
     }
   }
 `;
-
+// MOCK DATA PARA O SERASA
 const mockDetailData = {
   SinteseCadastral: {
     Documento: '12.345.678/0001-90',

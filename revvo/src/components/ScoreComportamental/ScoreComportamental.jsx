@@ -393,18 +393,7 @@ export function ScoreComportamental() {
         >
           Modelo Champion
         </Tab>
-        {/* <Tab
-          className={activeTab === 'challenger' ? 'active' : ''}
-          onClick={() => setActiveTab('challenger')}
-        >
-          Modelo Challenger
-        </Tab> */}
-        {/* <Tab
-          className={activeTab === 'comparison' ? 'active' : ''}
-          onClick={() => setActiveTab('comparison')}
-        >
-          Comparativo
-        </Tab> */}
+
       </TabContainer>
 
       <ContentArea>
