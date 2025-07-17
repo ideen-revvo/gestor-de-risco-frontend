@@ -248,7 +248,10 @@ export const ScoreService = {
         frequencia_calculo: model.frequencia_calculo,
         model_type: model.model_type,
         final_score: model.finalScore ?? model.final_score,
-        ks_score: model.ksScore ?? model.ks_score
+        ks_score: model.ksScore ?? model.ks_score,
+        target_nome: model.target_nome,
+        target_operador: model.target_operador,
+        target_valor: model.target_valor
       }, { id: model.id });
       // Atualizar variáveis (simples: deleta todas e insere as novas)
       await apiService.supabaseDelete('score_model_variables', { model_id: model.id });

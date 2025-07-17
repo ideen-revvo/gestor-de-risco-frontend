@@ -131,6 +131,26 @@ export function ModelDetails({ data, title, onUpdate }) {
       <GridContainer>
         <Card>
           <h3>Variáveis e Pesos</h3>
+          {/* Exibir variável target no topo */}
+          {data.target_nome && (
+            <div style={{
+              background: '#F3F6FB',
+              border: '1px solid var(--border-color)',
+              borderRadius: 6,
+              padding: '12px 16px',
+              marginBottom: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 16,
+              fontWeight: 500,
+              color: 'var(--primary-text)'
+            }}>
+              <span style={{ fontWeight: 600 }}>Variável Target:</span>
+              <span>{data.target_nome}</span>
+              <span style={{ color: 'var(--secondary-text)' }}>{data.target_operador}</span>
+              <span style={{ color: 'var(--primary-blue)' }}>{data.target_valor}</span>
+            </div>
+          )}
           <Table
             data={data.variables}
             columns={[
