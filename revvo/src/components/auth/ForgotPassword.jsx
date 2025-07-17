@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
+import { resetPasswordForEmail } from '../../services/authService';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
@@ -22,11 +23,7 @@ const ForgotPassword = () => {
       }
 
       // Enviar email de recuperação de senha usando Supabase
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`,
-      });
-
-      if (error) throw error;
+      await resetPasswordForEmail(email);
 
       // Mostrar mensagem de sucesso
       setSuccessMessage('E-mail de recuperação enviado com sucesso! Por favor, verifique sua caixa de entrada.');

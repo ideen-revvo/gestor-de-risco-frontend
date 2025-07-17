@@ -9,6 +9,8 @@ import { SAPCustomerService } from '../../services/SAPCustomerService';
 import OrdersTable from '../OrdersTable';
 import { CustomerTable, mockCustomers } from './CustomerTable';
 import { CustomerDetails } from './CustomerDetails';
+import { uploadFile, getPublicUrl, removeFile } from '../../services/storageService';
+import { getUserCompanyId, getCorporateGroupId as getGroupId, listCompaniesByCorporateGroup, getCustomerById, getAddressById, getCompaniesByCorporateGroup, getSalesOrders } from '../../services/businessAnalysisService';
 
 const Header = styled.header`
   margin-bottom: 24px;
@@ -403,7 +405,7 @@ const FinancialAnalysisContainer = styled.div`
     }
   }
 `;
-
+// MOCK DATA PARA O SERASA
 const mockDetailData = {
   SinteseCadastral: {
     Documento: '12.345.678/0001-90',
@@ -777,34 +779,19 @@ const BusinessAnalysis = () => {
   const loadUserData = async () => {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (!session?.user) {
         return;
       }
-      
-      const { data: userProfile } = await supabase
-        .from('user_profile')
-        .select('company_id')
-        .eq('logged_id', session.user.id)
-        .single();
-        
-      if (!userProfile?.company_id) {
+      const companyId = await getUserCompanyId(session.user.id);
+      if (!companyId) {
         return;
       }
-      
-      setUserCompanyId(userProfile.company_id);
-      
-      const { data: companyData } = await supabase
-        .from('company')
-        .select('corporate_group_id')
-        .eq('id', userProfile.company_id)
-        .single();
-
-      if (companyData?.corporate_group_id) {
-        setCorporateGroupId(companyData.corporate_group_id);
+      setUserCompanyId(companyId);
+      const corporateGroupId = await getGroupId(companyId);
+      if (corporateGroupId) {
+        setCorporateGroupId(corporateGroupId);
       }
-      
-      const customersData = await CustomerService.getCustomersByCompanyGroup(userProfile.company_id);
+      const customersData = await CustomerService.getCustomersByCompanyGroup(companyId);
       setCustomers(customersData || []);
     } catch (error) {
       setCustomers([]);
@@ -813,45 +800,17 @@ const BusinessAnalysis = () => {
 
   const loadSalesOrders = useCallback(async () => {
     if (!corporateGroupId) return;
-    
     const cacheKey = getCacheKey('salesOrders', selectedCustomer);
     const cached = getCachedData(cacheKey);
-    
     if (cached) {
       setSalesOrders(cached);
       return;
     }
-    
     try {
-      const { data: companiesData } = await supabase
-        .from('company')
-        .select('id')
-        .eq('corporate_group_id', corporateGroupId);
-
+      const companiesData = await getCompaniesByCorporateGroup(corporateGroupId);
       if (companiesData?.length > 0) {
         const companyIds = companiesData.map(c => c.id);
-        
-        let query = supabase
-          .from('sale_orders')
-          .select(`
-            id,
-            created_at,
-            customer_id,
-            customer:customer_id(id, name),
-            total_qtt,
-            total_amt, 
-            due_date
-          `)
-          .in('company_id', companyIds)
-          .order('created_at', { ascending: false });
-          
-        if (selectedCustomer) {
-          query = query.eq('customer_id', selectedCustomer);
-        }
-        
-        const { data: ordersData, error } = await query;
-
-        if (error) throw error;
+        const ordersData = await getSalesOrders({ companyIds, customerId: selectedCustomer });
         setSalesOrders(ordersData || []);
         setCachedData(cacheKey, ordersData || []);
       }
@@ -936,66 +895,42 @@ const BusinessAnalysis = () => {
   const handleFileUpload = async (e) => {
     const files = e.target.files;
     if (!files || files.length === 0) return;
-    
     const customerId = selectedCustomer;
-    
     if (!customerId) {
       alert('Selecione um cliente primeiro!');
       return;
     }
-    
     try {
       setUploading(true);
-      
       const { data: { session } } = await supabase.auth.getSession();
-      
       if (!session || !session.user) {
         throw new Error('Usuário não autenticado');
       }
-      
       const { data: userProfileData, error: userProfileError } = await supabase
         .from('user_profile')
         .select('company_id')
         .eq('logged_id', session.user.id)
         .single();
-        
       if (userProfileError || !userProfileData?.company_id) {
         throw new Error('Não foi possível obter a company_id do usuário');
       }
-      
       const userCompanyId = userProfileData.company_id;
       const customerIdString = customerId.toString();
       const basePath = `${userCompanyId}/${customerIdString}`;
       const uploadedFilesList = [];
-      
       for (let i = 0; i < files.length; i++) {
         const file = files[i];
         const filePath = `${basePath}/${Date.now()}_${file.name}`;
-        
-        const { data, error } = await supabase.storage
-          .from('financial-analysis')
-          .upload(filePath, file, {
-            cacheControl: '3600',
-            upsert: false
-          });
-          
-        if (error) {
-          continue;
-        } else {
-          const { data: { publicUrl } } = supabase.storage
-            .from('financial-analysis')
-            .getPublicUrl(filePath);
-            
-          uploadedFilesList.push({
-            name: file.name,
-            path: filePath,
-            url: publicUrl,
-            size: file.size,
-            type: file.type
-          });
-        }
+        await uploadFile('financial-analysis', filePath, file);
+        const publicUrl = getPublicUrl('financial-analysis', filePath);
+        uploadedFilesList.push({
+          name: file.name,
+          path: filePath,
+          url: publicUrl,
+          size: file.size,
+          type: file.type
+        });
       }
-      
       setUploadedFiles(prev => [...prev, ...uploadedFilesList]);
       e.target.value = null;
       alert(`${files.length} arquivo(s) carregado(s) com sucesso!`);
@@ -1009,23 +944,13 @@ const BusinessAnalysis = () => {
   const handleDeleteFile = async (fileIndex) => {
     try {
       const fileToDelete = uploadedFiles[fileIndex];
-      
       if (!fileToDelete || !fileToDelete.path) {
         throw new Error('Arquivo não encontrado');
       }
-      
-      const { error } = await supabase.storage
-        .from('financial-analysis')
-        .remove([fileToDelete.path]);
-        
-      if (error) {
-        throw error;
-      }
-      
+      await removeFile('financial-analysis', fileToDelete.path);
       const updatedFiles = [...uploadedFiles];
       updatedFiles.splice(fileIndex, 1);
       setUploadedFiles(updatedFiles);
-      
       alert('Arquivo excluído com sucesso!');
     } catch (error) {
       alert(`Erro ao excluir arquivo: ${error.message}`);
@@ -1098,48 +1023,24 @@ const BusinessAnalysis = () => {
         setCustomerAddress('');
         return;
       }
-      
       const cacheKey = getCacheKey('customerData', selectedCustomer);
       const cached = getCachedData(cacheKey);
-      
       if (cached) {
         setCustomerData(cached.customerData);
         setCustomerAddress(cached.customerAddress);
         return;
       }
-      
       try {
-        const { data, error } = await supabase
-          .from('customer')
-          .select(`
-            id,
-            name,
-            costumer_email,
-            costumer_phone,
-            costumer_cnpj,
-            costumer_razao_social,
-            company_code,
-            addr_id
-          `)
-          .eq('id', selectedCustomer)
-          .single();
-        if (error) throw error;
-        
+        const data = await getCustomerById(selectedCustomer);
         setCustomerData(data);
-        
         let addressString = '';
         if (data?.addr_id) {
-          const { data: addr, error: addrError } = await supabase
-            .from('address')
-            .select('*')
-            .eq('id', data.addr_id)
-            .single();
-          if (!addrError && addr) {
+          const addr = await getAddressById(data.addr_id);
+          if (addr) {
             addressString = `${addr.street || ''}${addr.num ? ', ' + addr.num : ''}${addr.compl ? ' - ' + addr.compl : ''}${addr.city ? ' - ' + addr.city : ''}${addr.state ? ' - ' + addr.state : ''}${addr.zcode ? ', ' + addr.zcode : ''}`.trim();
             setCustomerAddress(addressString);
           }
         }
-        
         setCachedData(cacheKey, { customerData: data, customerAddress: addressString });
       } catch (error) {
         setCustomerData(null);

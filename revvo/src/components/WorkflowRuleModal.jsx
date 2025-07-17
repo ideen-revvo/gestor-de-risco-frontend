@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { getGlobalCompanyId } from '../lib/globalState';
+import { listRoles } from '../services/userRoleService';
+import { createWorkflowRule, updateWorkflowRule } from '../services/workflowRuleService';
 
 const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
   const [loading, setLoading] = useState(false);
@@ -44,13 +46,7 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
 
   const loadRoles = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_role')
-        .select('id, name')
-        .eq('company_id', getGlobalCompanyId())
-        .order('name');
-
-      if (error) throw error;
+      const data = await listRoles(getGlobalCompanyId());
       setRoles(data || []);
     } catch (error) {
       console.error('Error loading roles:', error);
@@ -93,13 +89,15 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
     return isNaN(num) ? 0 : num;
   }
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSave = async () => {
     setLoading(true);
     try {
-      await onSave(formData);
-      setIsEditing(false);
-      setFormData(initialFormData);
+      if (isEditing && initialData?.id) {
+        await updateWorkflowRule(initialData.id, formData);
+      } else {
+        await createWorkflowRule(formData);
+      }
+      onSave();
     } catch (error) {
       console.error('Error saving workflow rule:', error);
     } finally {
@@ -126,7 +124,7 @@ const WorkflowRuleModal = ({ isOpen, onClose, onSave, initialData }) => {
         </div>
 
         <div className="p-6">
-          <form onSubmit={handleSubmit}>
+          <form onSubmit={handleSave}>
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">

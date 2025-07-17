@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { X, Buildings, User, ClipboardText, Info, PencilSimple } from '@phosphor-icons/react';
 import NewLimitOrder from './NewLimitOrder';
 import { supabase } from '../../lib/supabase';
+import { deleteCreditLimitRequest } from '../../services/creditLimitService';
 
 const Container = styled.div`
   padding: 32px;
@@ -327,20 +328,16 @@ const RequestDetails = ({ request, onClose }) => {
   const handleDeleteClick = async () => {
     if (!request?.id) return;
     setDeleteLoading(true);
-    
-    const { error } = await supabase
-      .from('credit_limit_request')
-      .delete()
-      .eq('id', request.id);
-    
-    setDeleteLoading(false);
-    setShowDeleteModal(false);
-    
-    if (!error) {
+    try {
+      await deleteCreditLimitRequest(request.id);
+      setDeleteLoading(false);
+      setShowDeleteModal(false);
       onClose();
       window.dispatchEvent(new CustomEvent('navigateToMyRequests'));
       window.dispatchEvent(new CustomEvent('refreshMyRequests'));
-    } else {
+    } catch (error) {
+      setDeleteLoading(false);
+      setShowDeleteModal(false);
       setShowToast(true);
       setTimeout(() => setShowToast(false), 3000);
     }

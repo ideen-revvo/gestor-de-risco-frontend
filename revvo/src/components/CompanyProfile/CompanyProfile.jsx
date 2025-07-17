@@ -3,6 +3,7 @@ import styled from 'styled-components';
 import { supabase } from '../../lib/supabase';
 import { getGlobalCompanyId } from '../../lib/globalState';
 import { X } from '@phosphor-icons/react';
+import { getCompanyById, updateCompany, createCompany, updateAddress, createAddress } from '../../services/companyService';
 
 const Container = styled.div`
   max-width: 800px;
@@ -178,15 +179,7 @@ const CompanyProfile = ({ onClose }) => {
       try {
         const companyId = getGlobalCompanyId();
         if (!companyId) return;
-
-        const { data: companyData, error: companyError } = await supabase
-          .from('company')
-          .select(`*, address:address_id(*)`)
-          .eq('id', companyId)
-          .single();
-
-        if (companyError) throw companyError;
-
+        const companyData = await getCompanyById(companyId);
         if (companyData) {
           const companyObj = {
             id: companyData.id,
@@ -209,7 +202,6 @@ const CompanyProfile = ({ onClose }) => {
               Country: ''
             }
           };
-
           setCompany(companyObj);
         }
       } catch (error) {
@@ -218,7 +210,6 @@ const CompanyProfile = ({ onClose }) => {
         setLoading(false);
       }
     }
-
     loadCompany();
   }, []);
 
@@ -234,69 +225,36 @@ const CompanyProfile = ({ onClose }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
     if (!validateForm()) return;
-    
     setSaving(true);
     try {
-      // Primeiro, vamos verificar se já existe um endereço
       if (company.address_id) {
-        // Atualiza o endereço existente
-        const { error: addressError } = await supabase
-          .from('address')
-          .update({
-            street: company.address.street,
-            num: company.address.num,
-            compl: company.address.compl,
-            zcode: company.address.zcode,
-            county: company.address.county,
-            city: company.address.city,
-            state: company.address.state,
-            Country: company.address.Country
-          })
-          .eq('id', company.address_id);
-
-        if (addressError) throw addressError;
+        await updateAddress(company.address_id, company.address);
       } else {
-        // Cria um novo endereço se não existir
-        const { data: addressData, error: addressError } = await supabase
-          .from('address')
-          .insert({
-            street: company.address.street,
-            num: company.address.num,
-            compl: company.address.compl,
-            zcode: company.address.zcode,
-            county: company.address.county,
-            city: company.address.city,
-            state: company.address.state,
-            Country: company.address.Country
-          })
-          .select();
-
-        if (addressError) throw addressError;
-        
-        // Atualiza o company.address_id com o novo ID do endereço
-        if (addressData && addressData.length > 0) {
-          company.address_id = addressData[0].id;
-        }
+        const address = await createAddress(company.address);
+        company.address_id = address.id;
       }
-
-      // Atualiza a empresa, incluindo a referência ao endereço
-      const { error } = await supabase
-        .from('company')
-        .update({
+      if (company.id) {
+        await updateCompany(company.id, {
           name: company.name,
           doc_num: company.doc_num,
-          income_yr: company.income_yr ? parseFloat(company.income_yr) : null,
-          employees_num: company.employees_num ? parseInt(company.employees_num) : null,
-          income_level: company.income_level ? parseInt(company.income_level) : null,
+          income_yr: company.income_yr,
+          employees_num: company.employees_num,
+          income_level: company.income_level,
           company_code: company.company_code,
           address_id: company.address_id
-        })
-        .eq('id', company.id);
-
-      if (error) throw error;
-      
+        });
+      } else {
+        await createCompany({
+          name: company.name,
+          doc_num: company.doc_num,
+          income_yr: company.income_yr,
+          employees_num: company.employees_num,
+          income_level: company.income_level,
+          company_code: company.company_code,
+          address_id: company.address_id
+        });
+      }
       if (onClose) onClose();
     } catch (error) {
       console.error('Error saving company:', error.message);

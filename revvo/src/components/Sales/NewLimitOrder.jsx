@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { mockCustomers } from './mockData';
 import Select from 'react-select';
 import styled from 'styled-components';
 import { CurrencyDollar, User, Building, Phone, Envelope, X, CaretDown, CaretUp } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase';
 import { DEFAULT_USER_ID } from '../../constants/defaults';
 import { getGlobalCompanyId } from '../../lib/globalState';
+import { createCreditLimitRequest, updateCreditLimitRequest, deleteCreditLimitRequest } from '../../services/creditLimitService';
+import { CustomerService } from '../../services/customerService';
+import { getWorkflowRules, createWorkflowSaleOrder, createWorkflowDetails } from '../../services/workflowService';
 
 const InfoItem = styled.div`
   display: flex;
@@ -512,29 +514,16 @@ const NewLimitOrder = ({ initialData, onClose }) => {
 
     try {
       let saleOrderId;
-      const { data, error } = initialData 
-        ? await supabase
-            .from('credit_limit_request')
-            .update(requestData)
-            .eq('id', initialData.id)
-            .select()
-        : await supabase
-            .from('credit_limit_request')
-            .insert([requestData])
-            .select();
-
-      if (error) throw error;
-      
-      saleOrderId = initialData ? initialData.id : data[0].id;
+      if (initialData) {
+        const updated = await updateCreditLimitRequest(initialData.id, requestData);
+        saleOrderId = updated.id;
+      } else {
+        const created = await createCreditLimitRequest(requestData);
+        saleOrderId = created.id;
+      }
 
       // Get workflow rules based on the credit limit amount
-      const { data: workflowRules, error: workflowRulesError } = await supabase
-        .from('workflow_rules')
-        .select('*')
-        .eq('company_id', getGlobalCompanyId())
-        .order('value_range', { ascending: true });
-
-      if (workflowRulesError) throw workflowRulesError;
+      const workflowRules = await getWorkflowRules(getGlobalCompanyId());
 
       // Find the applicable workflow rule based on the credit limit amount
       const applicableRule = workflowRules.find(rule => {
@@ -547,15 +536,7 @@ const NewLimitOrder = ({ initialData, onClose }) => {
       }
 
       // Create workflow_sale_order record
-      const { data: workflowOrder, error: workflowOrderError } = await supabase
-        .from('workflow_sale_order')
-        .insert([{
-          credit_limit_req_id: saleOrderId
-        }])
-        .select()
-        .single();
-
-      if (workflowOrderError) throw workflowOrderError;
+      const workflowOrder = await createWorkflowSaleOrder(saleOrderId);
 
       // Find all rules that have a lower value range than the applicable rule
       const lowerRules = workflowRules.filter(rule => {
@@ -597,11 +578,7 @@ const NewLimitOrder = ({ initialData, onClose }) => {
         }
       ];
 
-      const { error: workflowDetailsError } = await supabase
-        .from('workflow_details')
-        .insert(workflowDetails);
-
-      if (workflowDetailsError) throw workflowDetailsError;
+      await createWorkflowDetails(workflowDetails);
 
       setShowSuccessMessage(true);
       setTimeout(() => {
@@ -621,16 +598,17 @@ const NewLimitOrder = ({ initialData, onClose }) => {
   const handleDeleteOrder = async () => {
     if (!initialData?.id) return;
     setDeleteLoading(true);
-    const { error } = await supabase
-      .from('credit_limit_request')
-      .delete()
-      .eq('id', initialData.id);
-    setDeleteLoading(false);
-    setShowDeleteModal(false);
-    if (!error && onClose) {
-      onClose();
-      window.dispatchEvent(new CustomEvent('navigateToMyRequests'));
-    } else if (error) {
+    try {
+      await deleteCreditLimitRequest(initialData.id);
+      setDeleteLoading(false);
+      setShowDeleteModal(false);
+      if (onClose) {
+        onClose();
+        window.dispatchEvent(new CustomEvent('navigateToMyRequests'));
+      }
+    } catch (error) {
+      setDeleteLoading(false);
+      setShowDeleteModal(false);
       alert('Erro ao excluir solicitação!');
     }
   };
@@ -671,12 +649,8 @@ const NewLimitOrder = ({ initialData, onClose }) => {
         setCustomerDetails(null);
         return;
       }
-      const { data, error } = await supabase
-        .from('customer')
-        .select('id, name, company_code, costumer_email, costumer_phone, costumer_cnpj, costumer_razao_social, address:addr_id(*)')
-        .eq('id', selectedCustomer.id)
-        .single();
-      if (!error && data) {
+      const data = await CustomerService.getCustomerDetailsWithAddress(selectedCustomer.id);
+      if (data) {
         let addressString = '';
         if (data.address && !Array.isArray(data.address)) {
           const addr = data.address;

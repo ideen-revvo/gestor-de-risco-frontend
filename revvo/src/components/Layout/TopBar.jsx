@@ -3,6 +3,9 @@ import styled from 'styled-components';
 import { Question, Bell, User, SignOut } from '@phosphor-icons/react';
 import { supabase } from '../../lib/supabase';
 import { useNavigate } from 'react-router-dom';
+import { getWorkflowNotifications } from '../../services/notificationService';
+import { getUserName } from '../../services/userProfileService';
+import { logout } from '../../services/authService';
 
 const TopHeader = styled.div`
   height: 48px;
@@ -251,82 +254,22 @@ const TopBar = () => {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (!session?.user?.id) return;
-
-        const { data: userProfile } = await supabase
-          .from('user_profile')
-          .select('id, name, role_id')
-          .eq('logged_id', session.user.id)
-          .single();
-
-        if (!userProfile) return;
-
-        const { data: workflowDetails, error } = await supabase
-          .from('workflow_details')
-          .select(`
-            id,
-            workflow_sale_order_id,
-            approval,
-            workflow_sale_order (
-              credit_limit_req_id,
-              credit_limit_request!inner (
-                id, created_at, credit_limit_amt, customer_id, status_id
-              )
-            )
-          `)
-          .eq('jurisdiction_id', userProfile.role_id)
-          .is('approval', null);
-
-        if (error) throw error;
-
-        const notifications = (workflowDetails || []).map(wd => ({
-          id: wd.id,
-          title: "Solicitação de limite pendente",
-          message: `Solicitação #${wd.workflow_sale_order?.credit_limit_req_id} de limite de crédito`,
-          time: wd.workflow_sale_order?.credit_limit_request?.created_at
-            ? new Date(wd.workflow_sale_order.credit_limit_request.created_at).toLocaleString('pt-BR')
-            : '',
-          unread: true,
-          request: wd.workflow_sale_order?.credit_limit_request
-        }));
-
+        const notifications = await getWorkflowNotifications(session.user.id);
         setNotifications(notifications);
       } catch (error) {
         console.error('Erro ao buscar notificações:', error.message);
       }
     }
-
     fetchNotifications();
   }, []);
 
   useEffect(() => {
     async function loadUserProfile() {
       try {
-        let retries = 3;
-        let error;
-        
-        while (retries > 0) {
-          try {
-            const { data: { session } } = await supabase.auth.getSession();
-            if (!session?.user?.id) return;
-
-            const { data, error: profileError } = await supabase
-              .from('user_profile')
-              .select('name')
-              .eq('logged_id', session.user.id)
-              .single();
-
-            if (profileError) throw profileError;
-            setCurrentUser(data || { name: '' });
-            return;
-          } catch (e) {
-            error = e;
-            retries--;
-            if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            }
-          }
-        }
-        throw error;
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session?.user?.id) return;
+        const name = await getUserName(session.user.id);
+        setCurrentUser({ name });
       } catch (error) {
         console.error('Error loading user profile:', error.message);
       }
@@ -374,7 +317,7 @@ const TopBar = () => {
 
   const handleLogout = async () => {
     try {
-      const { error } = await supabase.auth.signOut();
+      await logout();
       // Redirect to login regardless of error
       navigate('/login');
     } catch (error) {

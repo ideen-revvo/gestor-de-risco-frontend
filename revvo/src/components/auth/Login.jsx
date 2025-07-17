@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, AlertCircle } from 'lucide-react'; 
 import { supabase } from '../../lib/supabase';
+import { login } from '../../services/authService';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -69,12 +70,10 @@ const Login = () => {
     setIsLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const data = await login({
         email: formData.email,
         password: formData.password,
       });
-
-      if (error) throw error;
 
       // Armazenar preferência "lembrar-me" se ativada
       if (rememberMe) {

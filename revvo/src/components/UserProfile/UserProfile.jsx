@@ -3,6 +3,8 @@ import styled from 'styled-components';
 import { supabase } from '../../lib/supabase';
 import { DEFAULT_COMPANY_ID } from '../../constants/defaults';
 import { X } from '@phosphor-icons/react';
+import { getCurrentUserProfile, upsertUserProfile, getRoles } from '../../services/userProfileService';
+import { getRoleNameById } from '../../services/userRoleService';
 
 const Container = styled.div`
   max-width: 800px;
@@ -165,14 +167,10 @@ const UserProfile = ({ onClose }) => {
     // Quando o profile carregar, buscar o nome da função se role_id existir
     const fetchRoleName = async () => {
       if (profile.role_id) {
-        const { data, error } = await supabase
-          .from('user_role')
-          .select('name')
-          .eq('id', profile.role_id)
-          .single();
-        if (!error && data) {
-          setRoleName(data.name);
-        } else {
+        try {
+          const name = await getRoleNameById(profile.role_id);
+          setRoleName(name);
+        } catch {
           setRoleName('');
         }
       } else {
@@ -189,21 +187,7 @@ const UserProfile = ({ onClose }) => {
         console.error('No user session found');
         return;
       }
-
-      const { data, error } = await supabase
-        .from('user_profile')
-        .select(`
-          *,
-          user_role:role_id (
-            id,
-            name
-          )
-        `)
-        .eq('logged_id', session.user.id)
-        .single();
-
-      if (error) throw error;
-
+      const data = await getCurrentUserProfile(session.user.id);
       if (data) {
         setProfile({
           id: data.id,
@@ -232,13 +216,7 @@ const UserProfile = ({ onClose }) => {
 
   const loadRoles = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_role')
-        .select('*')
-        .eq('company_id', DEFAULT_COMPANY_ID)
-        .order('name');
-
-      if (error) throw error;
+      const data = await getRoles(DEFAULT_COMPANY_ID);
       setRoles(data || []);
     } catch (error) {
       console.error('Error loading roles:', error.message);
@@ -258,25 +236,18 @@ const UserProfile = ({ onClose }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
     if (!validateForm()) return;
-    
     setSaving(true);
     try {
-      const { error } = await supabase
-        .from('user_profile')
-        .upsert({
-          id: profile.id,
-          name: profile.name,
-          email: profile.email,
-          doc_id: profile.doc_id,
-          birth_date: profile.birth_date,
-          role_id: profile.role_id,
-          company_id: DEFAULT_COMPANY_ID
-        });
-
-      if (error) throw error;
-      
+      await upsertUserProfile({
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        doc_id: profile.doc_id,
+        birth_date: profile.birth_date,
+        role_id: profile.role_id,
+        company_id: DEFAULT_COMPANY_ID
+      });
       if (onClose) onClose();
     } catch (error) {
       console.error('Error saving profile:', error.message);

@@ -3,6 +3,7 @@ import { Plus } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { DEFAULT_COMPANY_ID } from '../constants/defaults';
 import WorkflowRuleModal from './WorkflowRuleModal';
+import { listCreditLimitPolicies, createCreditLimitPolicy } from '../services/creditLimitPolicyService';
 
 const CreditLimitPolicies = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -15,13 +16,7 @@ const CreditLimitPolicies = () => {
 
   async function loadPolicies() {
     try {
-      const { data, error } = await supabase
-        .from('credit_limit_policies')
-        .select('*')
-        .eq('company_id', DEFAULT_COMPANY_ID)
-        .order('min_amount', { ascending: true });
-
-      if (error) throw error;
+      const data = await listCreditLimitPolicies(DEFAULT_COMPANY_ID);
       setPolicies(data || []);
     } catch (error) {
       console.error('Error loading policies:', error);
@@ -33,19 +28,13 @@ const CreditLimitPolicies = () => {
   const handleSave = async (formData) => {
     try {
       setLoading(true);
-      const { error } = await supabase
-        .from('credit_limit_policies')
-        .insert([
-          {
-            name: formData.nome,
-            min_amount: formData.amt_1[0],
-            max_amount: formData.amt_1[1],
-            approval_roles: formData.role_id,
-            company_id: DEFAULT_COMPANY_ID
-          }
-        ]);
-
-      if (error) throw error;
+      await createCreditLimitPolicy({
+        name: formData.nome,
+        min_amount: formData.amt_1[0],
+        max_amount: formData.amt_1[1],
+        approval_roles: formData.role_id,
+        company_id: DEFAULT_COMPANY_ID
+      });
       await loadPolicies();
       setIsModalOpen(false);
     } catch (error) {

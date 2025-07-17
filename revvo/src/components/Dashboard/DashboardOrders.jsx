@@ -5,6 +5,10 @@ import OrdersTable from '../OrdersTable';
 import { supabase } from '../../lib/supabase';
 import { getGlobalCompanyId } from '../../lib/globalState';
 import { toast } from 'react-hot-toast';
+import { uploadFile, getPublicUrl } from '../../services/storageService';
+import { getCreditLimitRequestsByCustomer, getWorkflowSaleOrder, getWorkflowDetails } from '../../services/workflowService';
+import { approveWorkflowStep, rejectWorkflowStep, startWorkflowStep, getWorkflowRules, getUserProfile } from '../../services/workflowService';
+import { getCalculatedCreditLimit } from '../../services/creditLimitService';
 
 const CaixaEntradaContainer = styled.div`
   background: white; 
@@ -556,116 +560,31 @@ const DashboardOrders = ({
   };
 
   const handleSaveAnalysis = async () => {
-    // Validate if we have a selected customer and credit limit
     if (!selectedDetailCard?.customer_id) {
       toast.error('Nenhum cliente selecionado');
       return;
     }
-
     try {
       setSaving(true);
-
-      // Get the current user's role
       const { data: { user } } = await supabase.auth.getUser();
-      const { data: userProfile } = await supabase
-        .from('user_profile')
-        .select('role_id')
-        .eq('logged_id', user.id)
-        .single();
-
-      if (!userProfile) {
-        throw new Error('Perfil de usuário não encontrado');
-      }
-
-      // Get workflow rules to check subordination
-      const { data: workflowRules, error: workflowRulesError } = await supabase
-        .from('workflow_rules')
-        .select('*')
-        .eq('company_id', getGlobalCompanyId())
-        .order('value_range', { ascending: true });
-
-      if (workflowRulesError) {
-        throw new Error('Erro ao buscar regras de workflow');
-      }
-
-      if (!workflowRules || workflowRules.length === 0) {
-        throw new Error('Nenhuma regra de workflow encontrada');
-      }
-
-      // Find the current step's rule
-      const currentStepRule = workflowRules.find(rule => 
-        rule.role_id === selectedWorkflowStep.jurisdiction_id
-      );
-
-      if (!currentStepRule) {
-        throw new Error('Regra de workflow não encontrada para a etapa atual');
-      }
-
-      // If user is administrator (role_id 1), they can approve/reject without checking their role rule
+      const userProfile = await getUserProfile(user.id);
+      if (!userProfile) throw new Error('Perfil de usuário não encontrado');
+      const workflowRules = await getWorkflowRules(getGlobalCompanyId());
+      if (!workflowRules || workflowRules.length === 0) throw new Error('Nenhuma regra de workflow encontrada');
+      const currentStepRule = workflowRules.find(rule => rule.role_id === selectedWorkflowStep.jurisdiction_id);
+      if (!currentStepRule) throw new Error('Regra de workflow não encontrada para a etapa atual');
       if (userProfile.role_id === 1) {
-        // Update the selected step with approval
-        const { error: updateError } = await supabase
-          .from('workflow_details')
-          .update({
-            approval: true,
-            approver: user.id,
-            finished_at: new Date().toISOString(),
-            parecer: comments
-          })
-          .eq('id', selectedWorkflowStep.id);
-
-        if (updateError) throw updateError;
-
-        // Get all previous steps
-        const previousSteps = workflowData.details.filter(detail => 
-          detail.workflow_step < selectedWorkflowStep.workflow_step
-        );
-
-        // For each previous step, check if it should be automatically approved
+        await approveWorkflowStep({ stepId: selectedWorkflowStep.id, approverId: user.id, comments });
+        const previousSteps = workflowData.details.filter(detail => detail.workflow_step < selectedWorkflowStep.workflow_step);
         for (const step of previousSteps) {
-          // Find the rule for this step
-          const stepRule = workflowRules.find(rule => 
-            rule.role_id === step.jurisdiction_id
-          );
-
+          const stepRule = workflowRules.find(rule => rule.role_id === step.jurisdiction_id);
           if (!stepRule) continue;
-
-          // If subordination is enabled for this step and user has higher role,
-          // or if this is a lower step in the chain, approve it
-          if ((stepRule.subordination && userRoleRule.value_range[0] > stepRule.value_range[0]) ||
-              stepRule.value_range[0] < currentStepRule.value_range[0]) {
-            const { error: lowerStepError } = await supabase
-              .from('workflow_details')
-              .update({
-                approval: true,
-                approver: user.id,
-                finished_at: new Date().toISOString(),
-                parecer: comments // Usando o mesmo parecer da etapa superior
-              })
-              .eq('id', step.id);
-
-            if (lowerStepError) throw lowerStepError;
+          if ((stepRule.subordination && userRoleRule.value_range[0] > stepRule.value_range[0]) || stepRule.value_range[0] < currentStepRule.value_range[0]) {
+            await approveWorkflowStep({ stepId: step.id, approverId: user.id, comments });
           }
         }
-
-        // Find the next step
-        const nextStep = workflowData.details.find(detail => 
-          detail.workflow_step === selectedWorkflowStep.workflow_step + 1
-        );
-
-        // If there is a next step, set its started_at
-        if (nextStep) {
-          const { error: nextStepError } = await supabase
-            .from('workflow_details')
-            .update({
-              started_at: new Date().toISOString()
-            })
-            .eq('id', nextStep.id);
-
-          if (nextStepError) throw nextStepError;
-        }
-
-        // Refresh workflow data
+        const nextStep = workflowData.details.find(detail => detail.workflow_step === selectedWorkflowStep.workflow_step + 1);
+        if (nextStep) await startWorkflowStep(nextStep.id);
         await fetchWorkflowData(selectedDetailCard.id);
         setShowApprovalModal(false);
         setSelectedWorkflowStep(null);
@@ -673,91 +592,24 @@ const DashboardOrders = ({
         setComments('');
         return;
       }
-
-      // For non-administrator users, check their role rule
-      const userRoleRule = workflowRules.find(rule => 
-        rule.role_id === userProfile.role_id
-      );
-
-      if (!userRoleRule) {
-        throw new Error('Regra de workflow não encontrada para o seu cargo');
-      }
-
-      // Check if user can approve based on subordination
-      const canApprove = 
-        // User is in the current step's role
-        userProfile.role_id === selectedWorkflowStep.jurisdiction_id ||
-        // Or user has a higher role and subordination is enabled
-        (userRoleRule.value_range[0] > currentStepRule.value_range[0] && currentStepRule.subordination);
-
+      const userRoleRule = workflowRules.find(rule => rule.role_id === userProfile.role_id);
+      if (!userRoleRule) throw new Error('Regra de workflow não encontrada para o seu cargo');
+      const canApprove = userProfile.role_id === selectedWorkflowStep.jurisdiction_id || (userRoleRule.value_range[0] > currentStepRule.value_range[0] && currentStepRule.subordination);
       if (!canApprove) {
         toast.error('Você não tem permissão para aprovar esta etapa');
         return;
       }
-
-      // Update the selected step with approval
-      const { error: updateError } = await supabase
-        .from('workflow_details')
-        .update({
-          approval: true,
-          approver: user.id,
-          finished_at: new Date().toISOString(),
-          parecer: comments
-        })
-        .eq('id', selectedWorkflowStep.id);
-
-      if (updateError) throw updateError;
-
-      // Get all previous steps
-      const previousSteps = workflowData.details.filter(detail => 
-        detail.workflow_step < selectedWorkflowStep.workflow_step
-      );
-
-      // For each previous step, check if it should be automatically approved
+      await approveWorkflowStep({ stepId: selectedWorkflowStep.id, approverId: user.id, comments });
+      const previousSteps = workflowData.details.filter(detail => detail.workflow_step < selectedWorkflowStep.workflow_step);
       for (const step of previousSteps) {
-        // Find the rule for this step
-        const stepRule = workflowRules.find(rule => 
-          rule.role_id === step.jurisdiction_id
-        );
-
+        const stepRule = workflowRules.find(rule => rule.role_id === step.jurisdiction_id);
         if (!stepRule) continue;
-
-        // If subordination is enabled for this step and user has higher role,
-        // or if this is a lower step in the chain, approve it
-        if ((stepRule.subordination && userRoleRule.value_range[0] > stepRule.value_range[0]) ||
-            stepRule.value_range[0] < currentStepRule.value_range[0]) {
-          const { error: lowerStepError } = await supabase
-            .from('workflow_details')
-            .update({
-              approval: true,
-              approver: user.id,
-              finished_at: new Date().toISOString(),
-              parecer: comments // Usando o mesmo parecer da etapa superior
-            })
-            .eq('id', step.id);
-
-          if (lowerStepError) throw lowerStepError;
+        if ((stepRule.subordination && userRoleRule.value_range[0] > stepRule.value_range[0]) || stepRule.value_range[0] < currentStepRule.value_range[0]) {
+          await approveWorkflowStep({ stepId: step.id, approverId: user.id, comments });
         }
       }
-
-      // Find the next step
-      const nextStep = workflowData.details.find(detail => 
-        detail.workflow_step === selectedWorkflowStep.workflow_step + 1
-      );
-
-      // If there is a next step, set its started_at
-      if (nextStep) {
-        const { error: nextStepError } = await supabase
-          .from('workflow_details')
-          .update({
-            started_at: new Date().toISOString()
-          })
-          .eq('id', nextStep.id);
-
-        if (nextStepError) throw nextStepError;
-      }
-
-      // Refresh workflow data
+      const nextStep = workflowData.details.find(detail => detail.workflow_step === selectedWorkflowStep.workflow_step + 1);
+      if (nextStep) await startWorkflowStep(nextStep.id);
       await fetchWorkflowData(selectedDetailCard.id);
       setShowApprovalModal(false);
       setSelectedWorkflowStep(null);
@@ -774,142 +626,39 @@ const DashboardOrders = ({
   const handleRejectAnalysis = async () => {
     try {
       setSaving(true);
-
-      // Get the current user's role
       const { data: { user } } = await supabase.auth.getUser();
-      const { data: userProfile } = await supabase
-        .from('user_profile')
-        .select('role_id')
-        .eq('logged_id', user.id)
-        .single();
-
-      if (!userProfile) {
-        throw new Error('Perfil de usuário não encontrado');
-      }
-
-      // Get workflow rules to check subordination
-      const { data: workflowRules, error: workflowRulesError } = await supabase
-        .from('workflow_rules')
-        .select('*')
-        .eq('company_id', getGlobalCompanyId())
-        .order('value_range', { ascending: true });
-
-      if (workflowRulesError) {
-        throw new Error('Erro ao buscar regras de workflow');
-      }
-
-      if (!workflowRules || workflowRules.length === 0) {
-        throw new Error('Nenhuma regra de workflow encontrada');
-      }
-
-      // Find the current step's rule
-      const currentStepRule = workflowRules.find(rule => 
-        rule.role_id === selectedWorkflowStep.jurisdiction_id
-      );
-
-      if (!currentStepRule) {
-        throw new Error('Regra de workflow não encontrada para a etapa atual');
-      }
-
-      // If user is administrator (role_id 1), they can approve/reject without checking their role rule
+      const userProfile = await getUserProfile(user.id);
+      if (!userProfile) throw new Error('Perfil de usuário não encontrado');
+      const workflowRules = await getWorkflowRules(getGlobalCompanyId());
+      if (!workflowRules || workflowRules.length === 0) throw new Error('Nenhuma regra de workflow encontrada');
+      const currentStepRule = workflowRules.find(rule => rule.role_id === selectedWorkflowStep.jurisdiction_id);
+      if (!currentStepRule) throw new Error('Regra de workflow não encontrada para a etapa atual');
       if (userProfile.role_id === 1) {
-        // Update the selected step with rejection
-        const { error: updateError } = await supabase
-          .from('workflow_details')
-          .update({
-            approval: false,
-            approver: user.id,
-            finished_at: new Date().toISOString(),
-            parecer: comments
-          })
-          .eq('id', selectedWorkflowStep.id);
-
-        if (updateError) throw updateError;
-
-        // Automatically reject all previous steps
-        const previousSteps = workflowData.details.filter(detail => 
-          detail.workflow_step < selectedWorkflowStep.workflow_step
-        );
-
+        await rejectWorkflowStep({ stepId: selectedWorkflowStep.id, approverId: user.id, comments });
+        const previousSteps = workflowData.details.filter(detail => detail.workflow_step < selectedWorkflowStep.workflow_step);
         for (const step of previousSteps) {
-          const { error: lowerStepError } = await supabase
-            .from('workflow_details')
-            .update({
-              approval: false,
-              approver: user.id,
-              finished_at: new Date().toISOString(),
-              parecer: 'Rejeitado automaticamente pelo administrador'
-            })
-            .eq('id', step.id);
-
-          if (lowerStepError) throw lowerStepError;
+          await rejectWorkflowStep({ stepId: step.id, approverId: user.id, comments: 'Rejeitado automaticamente pelo administrador' });
         }
-
-        // Refresh workflow data
         await fetchWorkflowData(selectedDetailCard.id);
         setShowApprovalModal(false);
         setSelectedWorkflowStep(null);
         setComments('');
         return;
       }
-
-      // For non-administrator users, check their role rule
-      const userRoleRule = workflowRules.find(rule => 
-        rule.role_id === userProfile.role_id
-      );
-
-      if (!userRoleRule) {
-        throw new Error('Regra de workflow não encontrada para o seu cargo');
-      }
-
-      // Check if user can reject based on subordination
-      const canReject = 
-        // User is in the current step's role
-        userProfile.role_id === selectedWorkflowStep.jurisdiction_id ||
-        // Or user has a higher role and subordination is enabled
-        (userRoleRule.value_range[0] > currentStepRule.value_range[0] && currentStepRule.subordination);
-
+      const userRoleRule = workflowRules.find(rule => rule.role_id === userProfile.role_id);
+      if (!userRoleRule) throw new Error('Regra de workflow não encontrada para o seu cargo');
+      const canReject = userProfile.role_id === selectedWorkflowStep.jurisdiction_id || (userRoleRule.value_range[0] > currentStepRule.value_range[0] && currentStepRule.subordination);
       if (!canReject) {
         toast.error('Você não tem permissão para rejeitar esta etapa');
         return;
       }
-
-      // Update the selected step with rejection
-      const { error: updateError } = await supabase
-        .from('workflow_details')
-        .update({
-          approval: false,
-          approver: user.id,
-          finished_at: new Date().toISOString(),
-          parecer: comments
-        })
-        .eq('id', selectedWorkflowStep.id);
-
-      if (updateError) throw updateError;
-
-      // If subordination is enabled and this is a higher role rejecting,
-      // automatically reject all previous steps
+      await rejectWorkflowStep({ stepId: selectedWorkflowStep.id, approverId: user.id, comments });
       if (currentStepRule.subordination && userRoleRule.value_range[0] > currentStepRule.value_range[0]) {
-        const previousSteps = workflowData.details.filter(detail => 
-          detail.workflow_step < selectedWorkflowStep.workflow_step
-        );
-
+        const previousSteps = workflowData.details.filter(detail => detail.workflow_step < selectedWorkflowStep.workflow_step);
         for (const step of previousSteps) {
-          const { error: lowerStepError } = await supabase
-            .from('workflow_details')
-            .update({
-              approval: false,
-              approver: user.id,
-              finished_at: new Date().toISOString(),
-              parecer: 'Rejeitado automaticamente por subordinação'
-            })
-            .eq('id', step.id);
-
-          if (lowerStepError) throw lowerStepError;
+          await rejectWorkflowStep({ stepId: step.id, approverId: user.id, comments: 'Rejeitado automaticamente por subordinação' });
         }
       }
-
-      // Refresh workflow data
       await fetchWorkflowData(selectedDetailCard.id);
       setShowApprovalModal(false);
       setSelectedWorkflowStep(null);
@@ -926,92 +675,44 @@ const DashboardOrders = ({
     const handleFileUpload = async (e) => {
       const files = e.target.files;
       if (!files || files.length === 0) return;
-      
-      // Verificar se temos customerId e userCompanyId
       const customerId = selectedCustomer;
-      
       if (!customerId) {
         alert('Selecione um cliente primeiro!');
         return;
       }
-      
-      // Buscar informações sobre a company do usuário logado
       try {
         setUploading(true);
-        
-        // 1. Obter a sessão atual do usuário
         const { data: { session } } = await supabase.auth.getSession();
-        
         if (!session || !session.user) {
           throw new Error('Usuário não autenticado');
         }
-        
-        // 2. Buscar o perfil do usuário para obter a company_id
         const { data: userProfileData, error: userProfileError } = await supabase
           .from('user_profile')
           .select('company_id')
           .eq('logged_id', session.user.id)
           .single();
-          
         if (userProfileError || !userProfileData?.company_id) {
           throw new Error('Não foi possível obter a company_id do usuário');
         }
-        
         const userCompanyId = userProfileData.company_id;
-        
-        // Usando diretamente o ID do cliente ao invés do nome
         const customerIdString = customerId.toString();
-        
-        // 4. Verificar se a pasta da company já existe
-        const { data: companyFolderExists } = await supabase
-          .storage
-          .from('financial-analysis')
-          .list(userCompanyId.toString());
-        
-        // Define o caminho base usando o ID da empresa e o ID do cliente
         const basePath = `${userCompanyId}/${customerIdString}`;
-        
-        // Array para armazenar os arquivos carregados
         const uploadedFilesList = [];
-        
-        // 5. Fazer upload de cada arquivo
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
           const filePath = `${basePath}/${Date.now()}_${file.name}`;
-          
-          // Upload do arquivo
-          const { data, error } = await supabase.storage
-            .from('financial-analysis')
-            .upload(filePath, file, {
-              cacheControl: '3600',
-              upsert: false
-            });
-            
-          if (error) {
-            console.error(`Erro ao fazer upload do arquivo ${file.name}:`, error);
-          } else {
-            // Obter a URL pública do arquivo
-            const { data: { publicUrl } } = supabase.storage
-              .from('financial-analysis')
-              .getPublicUrl(filePath);
-              
-            
-            uploadedFilesList.push({
-              name: file.name,
-              path: filePath,
-              url: publicUrl,
-              size: file.size,
-              type: file.type
-            });
-          }
+          await uploadFile('financial-analysis', filePath, file);
+          const publicUrl = getPublicUrl('financial-analysis', filePath);
+          uploadedFilesList.push({
+            name: file.name,
+            path: filePath,
+            url: publicUrl,
+            size: file.size,
+            type: file.type
+          });
         }
-        
-        // Atualizar a lista de arquivos carregados
         setUploadedFiles(prev => [...prev, ...uploadedFilesList]);
-        
-        // Limpar o input de arquivo
         e.target.value = null;
-        
         alert(`${files.length} arquivo(s) carregado(s) com sucesso!`);
       } catch (error) {
         console.error('Erro ao fazer upload de arquivos:', error);
@@ -1021,39 +722,14 @@ const DashboardOrders = ({
       }
     };
 
-  // Add this new function to load the calculated limit
   const handleLoadCalculatedLimit = async () => {
     if (!selectedDetailCard?.customer_id) return;
-    
     setLoadingCalculatedLimit(true);
     try {
-      // First get the customer's credit_limits_id
-      const { data: customerData, error: customerError } = await supabase
-        .from('customer')
-        .select('credit_limits_id')
-        .eq('id', selectedDetailCard.customer_id)
-        .single();
-      
-      if (customerError) throw customerError;
-      
-      if (customerData?.credit_limits_id) {
-        // Then get the calculated limit
-        const { data: creditLimitData, error: creditLimitError } = await supabase
-          .from('credit_limit_amount')
-          .select('credit_limit_calc')
-          .eq('id', customerData.credit_limits_id)
-          .single();
-          
-        if (creditLimitError) throw creditLimitError;
-        
-        if (creditLimitData?.credit_limit_calc) {
-          // Format and set the calculated limit
-          const formattedLimit = creditLimitData.credit_limit_calc.toLocaleString('pt-BR', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          });
-          setCreditLimit(formattedLimit);
-        }
+      const limit = await getCalculatedCreditLimit(selectedDetailCard.customer_id);
+      if (limit !== null) {
+        const formattedLimit = limit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        setCreditLimit(formattedLimit);
       }
     } catch (error) {
       console.error('Error loading calculated limit:', error);
@@ -1063,41 +739,14 @@ const DashboardOrders = ({
     }
   };
 
-  // Function to fetch workflow data
   const fetchWorkflowData = async (creditLimitReqId) => {
     if (!creditLimitReqId) return;
-    
     setLoadingWorkflow(true);
     try {
-      // First get the workflow_sale_order
-      const { data: workflowOrder, error: workflowOrderError } = await supabase
-        .from('workflow_sale_order')
-        .select('*')
-        .eq('credit_limit_req_id', creditLimitReqId)
-        .single();
-
-      if (workflowOrderError) throw workflowOrderError;
-
+      const workflowOrder = await getWorkflowSaleOrder(creditLimitReqId);
       if (workflowOrder) {
-        // Then get the workflow details with jurisdiction information
-        const { data: workflowDetails, error: workflowDetailsError } = await supabase
-          .from('workflow_details')
-          .select(`
-            *,
-            jurisdiction:user_role (
-              name,
-              description
-            )
-          `)
-          .eq('workflow_sale_order_id', workflowOrder.id)
-          .order('workflow_step', { ascending: true });
-
-        if (workflowDetailsError) throw workflowDetailsError;
-
-        setWorkflowData({
-          order: workflowOrder,
-          details: workflowDetails
-        });
+        const workflowDetails = await getWorkflowDetails(workflowOrder.id);
+        setWorkflowData({ order: workflowOrder, details: workflowDetails });
       }
     } catch (error) {
       console.error('Error fetching workflow data:', error);
@@ -1116,47 +765,18 @@ const DashboardOrders = ({
   // Function to fetch workflow history
   const fetchWorkflowHistory = async (customerId) => {
     if (!customerId) return;
-    
     setLoadingWorkflowHistory(true);
     try {
       // Get all credit limit requests for this customer
-      const { data: creditRequests, error: requestsError } = await supabase
-        .from('credit_limit_request')
-        .select('*')
-        .eq('customer_id', customerId)
-        .order('created_at', { ascending: false });
-
-      if (requestsError) throw requestsError;
-
+      const creditRequests = await getCreditLimitRequestsByCustomer(customerId);
       if (creditRequests?.length > 0) {
         const workflowHistoryData = [];
-
-        // For each credit request, get its workflow data
         for (const request of creditRequests) {
           // Get workflow_sale_order
-          const { data: workflowOrder, error: workflowOrderError } = await supabase
-            .from('workflow_sale_order')
-            .select('*')
-            .eq('credit_limit_req_id', request.id)
-            .single();
-
-          if (workflowOrderError || !workflowOrder) continue;
-
+          const workflowOrder = await getWorkflowSaleOrder(request.id);
+          if (!workflowOrder) continue;
           // Get workflow details with jurisdiction information
-          const { data: workflowDetails, error: workflowDetailsError } = await supabase
-            .from('workflow_details')
-            .select(`
-              *,
-              jurisdiction:user_role (
-                name,
-                description
-              )
-            `)
-            .eq('workflow_sale_order_id', workflowOrder.id)
-            .order('workflow_step', { ascending: true });
-
-          if (workflowDetailsError) continue;
-
+          const workflowDetails = await getWorkflowDetails(workflowOrder.id);
           workflowHistoryData.push({
             id: workflowOrder.id,
             creditRequest: request,
@@ -1167,7 +787,6 @@ const DashboardOrders = ({
                            workflowDetails?.some(d => d.approval === false) ? 'rejected' : 'pending'
           });
         }
-
         setWorkflowHistory(workflowHistoryData);
       } else {
         setWorkflowHistory([]);

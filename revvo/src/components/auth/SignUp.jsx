@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Eye, EyeOff, AlertCircle, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
+import { signup } from '../../services/authService';
 
 const SignUp = () => {
   const navigate = useNavigate();
@@ -136,42 +137,20 @@ const SignUp = () => {
     e.preventDefault();
     setError('');
     setSuccessMessage('');
-    
-    // Validar formulário antes de enviar
-    if (!validateForm()) {
-      return;
-    }
-    
+    if (!validateForm()) return;
     setIsLoading(true);
-
     try {
-      // Register the user with Supabase
-      const { data, error } = await supabase.auth.signUp({
+      await signup({
         email: formData.email,
         password: formData.password,
-        options: {
-          data: {
-            company_name: formData.companyName,
-            cnpj: formData.cnpj.replace(/\D/g, ''), // Remove non-digits from CNPJ
-            name: formData.userName,
-            role_id: 1 // Default role for company creator
-          }
-        }
+        name: formData.userName,
+        company: formData.companyName,
+        cnpj: formData.cnpj
       });
-
-      if (error) throw error;
-      
-      // Mostrar mensagem de sucesso
-      setSuccessMessage('Conta criada com sucesso! Verifique seu email para confirmar seu cadastro.');
-      
-      // Redirecionar para login após 3 segundos
-      setTimeout(() => {
-        navigate('/login');
-      }, 3000);
-      
+      setSuccessMessage('Cadastro realizado com sucesso! Verifique seu e-mail para confirmar a conta.');
+      setTimeout(() => navigate('/login'), 2000);
     } catch (error) {
-      console.error('Error signing up:', error.message);
-      setError(translateErrorMessage(error.message));
+      setError(error.message);
     } finally {
       setIsLoading(false);
     }

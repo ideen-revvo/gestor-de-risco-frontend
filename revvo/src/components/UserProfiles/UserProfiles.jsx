@@ -8,6 +8,7 @@ import UserProfilesFilter from './UserProfilesFilter';
 import UserProfilesList from './UserProfilesList';
 import UserProfilesForm from './UserProfilesForm';
 import { X } from '@phosphor-icons/react';
+import { listUserProfiles, deleteUserProfile, listCompanies, getRoles } from '../../services/userProfileService';
 
 const Container = styled.div`
   padding: 24px;
@@ -28,23 +29,7 @@ const UserProfiles = () => {
 
   const loadProfiles = async () => {
     try {
-      const { data, error } = await supabase
-        .from('user_profile')
-        .select(`
-          *,
-          user_role:role_id (
-            id,
-            name
-          ),
-          company:company_id (
-            id,
-            name
-          )
-        `)
-        .eq('company_id', getGlobalCompanyId())
-        .order('name', { ascending: true });
-
-      if (error) throw error;
+      const data = await listUserProfiles(getGlobalCompanyId());
       setProfiles(data || []);
     } catch (error) {
       console.error('Error loading profiles:', error);
@@ -58,32 +43,19 @@ const UserProfiles = () => {
   useEffect(() => {
     async function loadRoles() {
       try {
-        const { data, error } = await supabase
-          .from('user_role')
-          .select('*')
-          .eq('company_id', getGlobalCompanyId())
-          .order('name', { ascending: true });
-
-        if (error) throw error;
+        const data = await getRoles(getGlobalCompanyId());
         setRoles(data || []);
       } catch (error) {
         console.error('Error loading roles:', error);
       }
     }
-
     loadRoles();
   }, []);
 
   useEffect(() => {
     async function loadCompanies() {
       try {
-        const { data, error } = await supabase
-          .from('company')
-          .select('id, name')
-          .eq('id', getGlobalCompanyId())
-          .order('name', { ascending: true });
-
-        if (error) throw error;
+        const data = await listCompanies(getGlobalCompanyId());
         setCompanies(data || []);
       } catch (error) {
         console.error('Error loading companies:', error);
@@ -122,12 +94,7 @@ const UserProfiles = () => {
         }
 
         // Excluir do user_profile
-        const { error } = await supabase
-          .from('user_profile')
-          .delete()
-          .eq('id', profileId);
-
-        if (error) throw error;
+        await deleteUserProfile(profileId);
 
         // Recarregar a lista de perfis
         await loadProfiles();
