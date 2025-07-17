@@ -1,9 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { FunnelSimple, CaretDown } from '@phosphor-icons/react';
 import { ResponsiveContainer, ComposedChart, BarChart, Bar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import styled from 'styled-components';
 import { supabase } from '../../lib/supabase';
-import { BillingService, CustomerService, ScoreService, RiskSummaryService } from '../../services';
+import { CustomerService } from '../../services';
+import { SAPRiskService, SAPBillingService, SAPScoreService } from '../../services/OptimizedSAPServices';
+import { SAPCustomerService } from '../../services/SAPCustomerService';
 import OrdersTable from '../OrdersTable';
 import { CustomerTable, mockCustomers } from './CustomerTable';
 import { CustomerDetails } from './CustomerDetails';
@@ -375,7 +377,7 @@ const FinancialAnalysisContainer = styled.div`
     display: flex;
     justify-content: flex-end;
     gap: 8px;
-    margin-top: 160px;
+    margin-top: auto;
     
     button {
       padding: 8px 16px;
@@ -440,6 +442,8 @@ const mockDetailData = {
   ]
 };
 
+const CACHE_DURATION = 5 * 60 * 1000;
+
 const BusinessAnalysis = () => {
   const [selectedCustomer, setSelectedCustomer] = useState('');
   const [customers, setCustomers] = useState([]);
@@ -451,8 +455,8 @@ const BusinessAnalysis = () => {
     variationPercentage: 0
   });
   const [scoreMetrics, setScoreMetrics] = useState({
-    currentScore: 850,
-    scoreVariation: 13
+    currentScore: 0,
+    scoreVariation: 0
   });
   const [companyName, setCompanyName] = useState('');
   const [customerData, setCustomerData] = useState(null);
@@ -464,6 +468,7 @@ const BusinessAnalysis = () => {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(false);
   const [loadingScore, setLoadingScore] = useState(false);
+  const [loadingRiskData, setLoadingRiskData] = useState(false);
   const [creditLimitsId, setCreditLimitsId] = useState(null);  
   const [uploading, setUploading] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
@@ -479,16 +484,45 @@ const BusinessAnalysis = () => {
   
   const [selectedCustomerDetails, setSelectedCustomerDetails] = useState(null);
   const [riskSummaryData, setRiskSummaryData] = useState({
-    creditLimitGranted: 500000.00,
-    creditLimitUsed: 65,
-    amountToReceive: 175000.00,
-    avgPaymentTerm: 45,
-    isOverdue: true,
-    overdueAmount: 97000.00,
-    avgDelayDays: 15,
-    maxDelayDays12Months: 32
+    creditLimitGranted: 0,
+    creditLimitUsed: 0,
+    amountToReceive: 0,
+    avgPaymentTerm: 0,
+    isOverdue: false,
+    overdueAmount: 0,
+    avgDelayDays: 0,
+    maxDelayDays12Months: 0,
+    maxCurrentDelayDays: 0
   });
   
+  const [dataCache, setDataCache] = useState(new Map());
+  const abortControllerRef = useRef(null);
+  const [lastLoadTime, setLastLoadTime] = useState(0);
+
+  const getCacheKey = (type, customerId) => `${type}-${customerId || 'all'}`;
+
+  const getCachedData = useCallback((key) => {
+    const cached = dataCache.get(key);
+    if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
+      return cached.data;
+    }
+    return null;
+  }, [dataCache]);
+
+  const setCachedData = useCallback((key, data) => {
+    setDataCache(prev => new Map(prev.set(key, {
+      data,
+      timestamp: Date.now()
+    })));
+  }, []);
+
+  const clearCache = useCallback(() => {
+    setDataCache(new Map());
+    SAPBillingService.clearCache();
+    SAPRiskService.clearCache();
+    SAPScoreService.clearCache();
+  }, []);
+
   const formatCurrency = (value) => {
     const num = Number(value.replace(/[^\d]/g, '')) / 100;
     if (isNaN(num)) return '';
@@ -512,8 +546,59 @@ const BusinessAnalysis = () => {
     );
   };
 
+  const loadRiskSummaryData = useCallback(async (forceReload = false) => {
+    const now = Date.now();
+    if (!forceReload && now - lastLoadTime < 1000) {
+      return;
+    }
+    setLastLoadTime(now);
+
+    const cacheKey = getCacheKey('riskSummary', selectedCustomer);
+    const cached = getCachedData(cacheKey);
+    
+    if (cached && !forceReload) {
+      setRiskSummaryData(cached);
+      return;
+    }
+
+    setLoadingRiskData(true);
+    try {
+      let riskData;
+      
+      if (selectedCustomer && customerData?.company_code) {
+        riskData = await SAPRiskService.getCustomerRiskData(
+          selectedCustomer, 
+          customerData.company_code
+        );
+      } else if (!selectedCustomer && customers.length > 0) {
+        riskData = await SAPRiskService.getAllCustomersRiskData(customers);
+      } else {
+        riskData = SAPRiskService.getEmptyRiskData();
+      }
+      
+      setRiskSummaryData(riskData);
+      setCachedData(cacheKey, riskData);
+      
+    } catch (error) {
+      setRiskSummaryData(SAPRiskService.getEmptyRiskData());
+    } finally {
+      setLoadingRiskData(false);
+    }
+  }, [selectedCustomer, customerData?.company_code, customers, getCachedData, setCachedData, lastLoadTime]);
+
   const loadCustomerCreditLimits = async (customerId) => {
     if (!customerId) return;
+    
+    const cacheKey = getCacheKey('creditLimits', customerId);
+    const cached = getCachedData(cacheKey);
+    
+    if (cached) {
+      setCreditLimitsId(cached.creditLimitsId);
+      setCreditLimit(cached.creditLimit);
+      setPrepaidLimit(cached.prepaidLimit);
+      setComments(cached.comments);
+      return;
+    }
     
     setLoading(true);
     try {
@@ -524,6 +609,8 @@ const BusinessAnalysis = () => {
         setCreditLimit(creditData.creditLimit);
         setPrepaidLimit(creditData.prepaidLimit);
         setComments(creditData.comments);
+        
+        setCachedData(cacheKey, creditData);
       } else {
         setCreditLimitsId(null);
         setCreditLimit('');
@@ -531,7 +618,10 @@ const BusinessAnalysis = () => {
         setComments('');
       }
     } catch (error) {
-      console.error('Error loading customer credit limits:', error);
+      setCreditLimitsId(null);
+      setCreditLimit('');
+      setPrepaidLimit('');
+      setComments('');
     } finally {
       setLoading(false);
     }
@@ -561,9 +651,12 @@ const BusinessAnalysis = () => {
       };
 
       await CustomerService.updateCustomerCreditLimits(selectedCustomer, limitData);
+      
+      const cacheKey = getCacheKey('creditLimits', selectedCustomer);
+      dataCache.delete(cacheKey);
+      
       alert('Análise financeira salva com sucesso!');
     } catch (error) {
-      console.error('Error saving credit limit:', error);
       alert(`Erro ao salvar análise financeira: ${error.message}`);
     } finally {
       setSaving(false);
@@ -571,7 +664,19 @@ const BusinessAnalysis = () => {
   };
 
   const fetchWorkflowHistory = async (customerId) => {
-    if (!customerId) return;
+    if (!customerId) {
+      setWorkflowHistory([]);
+      return;
+    }
+    
+    const cacheKey = getCacheKey('workflowHistory', customerId);
+    const cached = getCachedData(cacheKey);
+    
+    if (cached) {
+      setWorkflowHistory(cached);
+      return;
+    }
+    
     setLoadingWorkflowHistory(true);
     try {
       const { data: creditRequests, error: requestsError } = await supabase
@@ -642,11 +747,12 @@ const BusinessAnalysis = () => {
         }
 
         setWorkflowHistory(workflowHistoryData);
+        setCachedData(cacheKey, workflowHistoryData);
       } else {
         setWorkflowHistory([]);
+        setCachedData(cacheKey, []);
       }
     } catch (error) {
-      console.error('Error fetching workflow history:', error);
       setWorkflowHistory([]);
     } finally {
       setLoadingWorkflowHistory(false);
@@ -673,7 +779,6 @@ const BusinessAnalysis = () => {
       const { data: { session } } = await supabase.auth.getSession();
       
       if (!session?.user) {
-        console.error('User not authenticated');
         return;
       }
       
@@ -684,7 +789,6 @@ const BusinessAnalysis = () => {
         .single();
         
       if (!userProfile?.company_id) {
-        console.error('Company ID not found');
         return;
       }
       
@@ -703,12 +807,20 @@ const BusinessAnalysis = () => {
       const customersData = await CustomerService.getCustomersByCompanyGroup(userProfile.company_id);
       setCustomers(customersData || []);
     } catch (error) {
-      console.error('Error loading user data:', error);
+      setCustomers([]);
     }
   };
 
-  const loadSalesOrders = async () => {
+  const loadSalesOrders = useCallback(async () => {
     if (!corporateGroupId) return;
+    
+    const cacheKey = getCacheKey('salesOrders', selectedCustomer);
+    const cached = getCachedData(cacheKey);
+    
+    if (cached) {
+      setSalesOrders(cached);
+      return;
+    }
     
     try {
       const { data: companiesData } = await supabase
@@ -741,77 +853,85 @@ const BusinessAnalysis = () => {
 
         if (error) throw error;
         setSalesOrders(ordersData || []);
+        setCachedData(cacheKey, ordersData || []);
       }
     } catch (error) {
-      console.error('Error loading sales orders:', error);
+      setSalesOrders([]);
     }
-  };
+  }, [selectedCustomer, corporateGroupId, getCachedData, setCachedData]);
 
-  const loadMonthlyBilling = async () => {
-    if (!corporateGroupId) return;
+  const loadMonthlyBilling = useCallback(async () => {
+    if (!customers.length) return;
     
-    setLoading(true);
-    try {
-      const billingData = await BillingService.getMonthlyBillingData(selectedCustomer, corporateGroupId);
-      
-      const billingWithOccupation = await BillingService.getCreditLimitOccupation(selectedCustomer, billingData);
-      
-      setMonthlyBilling(billingWithOccupation);
-      
-      const metrics = BillingService.calculateBillingMetrics(billingData);
-      setBillingMetrics(metrics);
-    } catch (error) {
-      console.error('Error loading billing data:', error);
-      setMonthlyBilling([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const loadRiskSummaryData = async () => {
-    if (!selectedCustomer || !corporateGroupId) {
-      console.log('Missing customer or corporate group ID, using mock data');
+    const cacheKey = getCacheKey('monthlyBilling', selectedCustomer);
+    const cached = getCachedData(cacheKey);
+    
+    if (cached) {
+      setMonthlyBilling(cached.billingWithOccupation);
+      setBillingMetrics(cached.metrics);
       return;
     }
     
+    setLoading(true);
     try {
-      console.log('Loading risk summary data for customer:', selectedCustomer);
-      setLoading(true); // Adicione um estado de loading se necessário
+      const billingData = await SAPBillingService.getMonthlyBillingData(selectedCustomer, customers);
       
-      const riskData = await RiskSummaryService.getRiskSummaryData(selectedCustomer, corporateGroupId);
+      let billingWithOccupation = billingData;
       
-      console.log('Risk data loaded:', riskData);
-      setRiskSummaryData(riskData);
-      
-      // Verificar se os dados estão sendo preenchidos corretamente
-      if (riskData.creditLimitGranted === 0 && riskData.amountToReceive === 0) {
-        console.warn('Risk data appears to be empty, check data sources');
+      if (selectedCustomer && customerData?.company_code) {
+        billingWithOccupation = await SAPBillingService.getCreditLimitOccupation(
+          selectedCustomer, 
+          billingData, 
+          customers
+        );
+      } else {
+        billingWithOccupation = billingData.map(item => ({ ...item, occupation: 0 }));
       }
       
+      setMonthlyBilling(billingWithOccupation);
+      
+      const metrics = SAPBillingService.calculateBillingMetrics(billingData);
+      setBillingMetrics(metrics);
+      
+      setCachedData(cacheKey, { billingWithOccupation, metrics });
     } catch (error) {
-      console.error('Error loading risk summary data:', error);
-      // Em caso de erro, manter os dados mock para não quebrar a interface
-      setRiskSummaryData(RiskSummaryService.getMockRiskData());
+      setMonthlyBilling([]);
+      const emptyMetrics = { currentAverage: 0, previousAverage: 0, variation: 0, variationPercentage: 0 };
+      setBillingMetrics(emptyMetrics);
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedCustomer, customerData?.company_code, customers, getCachedData, setCachedData]);
 
-  const loadPaymentTermAndScore = async () => {
+  const loadPaymentTermAndScore = useCallback(async () => {
+    if (!customers.length) return;
+    
+    const cacheKey = getCacheKey('paymentTermScore', selectedCustomer);
+    const cached = getCachedData(cacheKey);
+    
+    if (cached) {
+      setPaymentTermScoreData(cached.scoreData);
+      setScoreMetrics(cached.metrics);
+      return;
+    }
+    
     setLoadingScore(true);
     try {
-      const scoreData = await ScoreService.getPaymentTermAndScore(selectedCustomer, corporateGroupId);
+      const scoreData = await SAPScoreService.getPaymentTermAndScore(selectedCustomer, customers);
       setPaymentTermScoreData(scoreData);
       
-      const metrics = ScoreService.calculateScoreMetrics(scoreData);
+      const metrics = SAPScoreService.calculateScoreMetrics(scoreData);
       setScoreMetrics(metrics);
+      
+      setCachedData(cacheKey, { scoreData, metrics });
     } catch (error) {
-      console.error('Error loading payment term and score data:', error);
       setPaymentTermScoreData([]);
+      const emptyMetrics = { currentScore: 0, previousScore: 0, scoreVariation: 0 };
+      setScoreMetrics(emptyMetrics);
     } finally {
       setLoadingScore(false);
     }
-  };
+  }, [selectedCustomer, customers, getCachedData, setCachedData]);
 
   const handleFileUpload = async (e) => {
     const files = e.target.files;
@@ -860,7 +980,7 @@ const BusinessAnalysis = () => {
           });
           
         if (error) {
-          console.error(`Erro ao fazer upload do arquivo ${file.name}:`, error);
+          continue;
         } else {
           const { data: { publicUrl } } = supabase.storage
             .from('financial-analysis')
@@ -880,7 +1000,6 @@ const BusinessAnalysis = () => {
       e.target.value = null;
       alert(`${files.length} arquivo(s) carregado(s) com sucesso!`);
     } catch (error) {
-      console.error('Erro ao fazer upload de arquivos:', error);
       alert(`Erro ao fazer upload: ${error.message}`);
     } finally {
       setUploading(false);
@@ -909,62 +1028,68 @@ const BusinessAnalysis = () => {
       
       alert('Arquivo excluído com sucesso!');
     } catch (error) {
-      console.error('Erro ao excluir arquivo:', error);
       alert(`Erro ao excluir arquivo: ${error.message}`);
     }
   };
 
   const handleLoadCalculatedLimit = async () => {
-    if (!selectedCustomer) return;
+    if (!selectedCustomer || !customerData?.company_code) {
+      alert('Dados do cliente não disponíveis');
+      return;
+    }
     
     setLoadingCalculatedLimit(true);
     try {
-      const { data: customerData, error: customerError } = await supabase
-        .from('customer')
-        .select('credit_limits_id')
-        .eq('id', selectedCustomer)
-        .single();
+      const creditLimitData = await SAPCustomerService.getCustomerCreditLimit(customerData.company_code);
       
-      if (customerError) throw customerError;
-      
-      if (customerData?.credit_limits_id) {
-        const { data: creditLimitData, error: creditLimitError } = await supabase
-          .from('credit_limit_amount')
-          .select('credit_limit_calc')
-          .eq('id', customerData.credit_limits_id)
-          .single();
-          
-        if (creditLimitError) throw creditLimitError;
-        
-        if (creditLimitData?.credit_limit_calc) {
-          const formattedLimit = creditLimitData.credit_limit_calc.toLocaleString('pt-BR', {
-            minimumFractionDigits: 2,
-            maximumFractionDigits: 2
-          });
-          setCreditLimit(formattedLimit);
-        }
+      if (creditLimitData?.calculatedLimit && creditLimitData.calculatedLimit > 0) {
+        const formattedLimit = creditLimitData.calculatedLimit.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2
+        });
+        setCreditLimit(formattedLimit);
+      } else {
+        alert('Limite calculado não disponível para este cliente');
       }
     } catch (error) {
-      console.error('Error loading calculated limit:', error);
       alert('Erro ao carregar limite calculado');
     } finally {
       setLoadingCalculatedLimit(false);
     }
   };
 
+  const handleCustomerChange = useCallback((customerId) => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    setSelectedCustomer(customerId);
+    
+    if (customerId !== selectedCustomer) {
+      setCreditLimit('');
+      setPrepaidLimit('');
+      setComments('');
+      setUploadedFiles([]);
+    }
+    
+    if (selectedCustomer && selectedCustomer !== customerId) {
+      clearCache();
+    }
+  }, [selectedCustomer, clearCache]);
+
   useEffect(() => {
     loadUserData();
   }, []);
 
   useEffect(() => {
-  // if (corporateGroupId && selectedCustomer) {
-    console.log('Loading all customer data for:', selectedCustomer);
-    loadSalesOrders();
-    loadMonthlyBilling();
-    loadPaymentTermAndScore();
-    loadRiskSummaryData();
-  // }
-  }, [selectedCustomer, corporateGroupId]);
+    if (corporateGroupId) {
+      loadSalesOrders();
+    }
+    if (customers.length > 0) {
+      loadMonthlyBilling();
+      loadPaymentTermAndScore();
+    }
+  }, [corporateGroupId, selectedCustomer, customers, loadSalesOrders, loadMonthlyBilling, loadPaymentTermAndScore]);
 
   useEffect(() => {
     const fetchCustomerData = async () => {
@@ -973,6 +1098,16 @@ const BusinessAnalysis = () => {
         setCustomerAddress('');
         return;
       }
+      
+      const cacheKey = getCacheKey('customerData', selectedCustomer);
+      const cached = getCachedData(cacheKey);
+      
+      if (cached) {
+        setCustomerData(cached.customerData);
+        setCustomerAddress(cached.customerAddress);
+        return;
+      }
+      
       try {
         const { data, error } = await supabase
           .from('customer')
@@ -989,8 +1124,10 @@ const BusinessAnalysis = () => {
           .eq('id', selectedCustomer)
           .single();
         if (error) throw error;
+        
         setCustomerData(data);
-        // Buscar endereço se addr_id existir
+        
+        let addressString = '';
         if (data?.addr_id) {
           const { data: addr, error: addrError } = await supabase
             .from('address')
@@ -998,23 +1135,19 @@ const BusinessAnalysis = () => {
             .eq('id', data.addr_id)
             .single();
           if (!addrError && addr) {
-            // Montar string do endereço
-            const addressString = `${addr.street || ''}${addr.num ? ', ' + addr.num : ''}${addr.compl ? ' - ' + addr.compl : ''}${addr.city ? ' - ' + addr.city : ''}${addr.state ? ' - ' + addr.state : ''}${addr.zcode ? ', ' + addr.zcode : ''}`.trim();
+            addressString = `${addr.street || ''}${addr.num ? ', ' + addr.num : ''}${addr.compl ? ' - ' + addr.compl : ''}${addr.city ? ' - ' + addr.city : ''}${addr.state ? ' - ' + addr.state : ''}${addr.zcode ? ', ' + addr.zcode : ''}`.trim();
             setCustomerAddress(addressString);
-          } else {
-            setCustomerAddress('');
           }
-        } else {
-          setCustomerAddress('');
         }
+        
+        setCachedData(cacheKey, { customerData: data, customerAddress: addressString });
       } catch (error) {
-        console.error('Erro ao buscar dados do cliente:', error);
         setCustomerData(null);
         setCustomerAddress('');
       }
     };
     fetchCustomerData();
-  }, [selectedCustomer]);
+  }, [selectedCustomer, getCachedData, setCachedData]);
 
   useEffect(() => {
     if (selectedCustomer) {
@@ -1022,8 +1155,24 @@ const BusinessAnalysis = () => {
       fetchWorkflowHistory(selectedCustomer);
     } else {
       setWorkflowHistory([]);
+      setUploadedFiles([]);
+      setCreditLimit('');
+      setPrepaidLimit('');
+      setComments('');
     }
   }, [selectedCustomer]);
+
+  useEffect(() => {
+    if (customers.length > 0) {
+      loadRiskSummaryData();
+    }
+  }, [customers, selectedCustomer, customerData?.company_code, loadRiskSummaryData]);
+
+  useEffect(() => {
+    if (selectedCustomer && customerData?.company_code && monthlyBilling.length > 0) {
+      loadMonthlyBilling();
+    }
+  }, [customerData?.company_code]);
 
   return (
     <>
@@ -1044,10 +1193,10 @@ const BusinessAnalysis = () => {
               <div style={{ display: 'flex', gap: '8px', marginBottom: 12 }}>
                 <select
                   value={selectedCustomer}
-                  onChange={(e) => setSelectedCustomer(e.target.value)}
+                  onChange={(e) => handleCustomerChange(e.target.value)}
                   style={{ width: '270px', height: 32 }}
                 >
-                  <option value="">Todos</option>
+                  <option value="">Todos os clientes</option>
                   {customers.map(customer => (
                     <option key={customer.id} value={customer.id}>
                       {customer.company_code ? `${customer.company_code} - ${customer.name}` : customer.name}
@@ -1064,7 +1213,7 @@ const BusinessAnalysis = () => {
                     borderRadius: '4px',
                     cursor: 'pointer'
                   }} 
-                  onClick={() => setSelectedCustomer('')}
+                  onClick={() => handleCustomerChange('')}
                 >
                   Limpar filtros
                 </button>
@@ -1074,73 +1223,16 @@ const BusinessAnalysis = () => {
         </div>
       </SearchBar>
 
-      {selectedCustomer && (
-        <div className="customer-details" style={{
-          background: 'white',
-          border: '1px solid #E5E7EB',
-          borderRadius: 8,
-          padding: 24,
-          marginBottom: 24,
-          maxWidth: '100%'
-        }}>
-          <div className="header" style={{
-            marginBottom: 24,
-            borderBottom: '1px solid #E5E7EB',
-            paddingBottom: 16,
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center'
-          }}>
-            <h2 style={{ fontSize: 20, fontWeight: 600, color: '#111827', marginBottom: 0 }}>{customerData?.name}</h2>
-            <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }} onClick={() => setIsExpandedDetails(prev => !prev)}>
-              <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ transform: isExpandedDetails ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
-                <path d="M5 8L10 13L15 8" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-            </span>
-          </div>
-          {isExpandedDetails && (
-            <>
-              <div style={{ fontSize: 14, color: '#6B7280', marginTop: 0, marginBottom: 0 }}>Código: {customerData?.company_code}</div>
-              <div className="content" style={{ display: 'flex', gap: 48, marginTop: 24 }}>
-                <div className="company-info" style={{ display: 'flex', gap: 48, flex: 1 }}>
-                  <div className="info-field" style={{ flex: 1 }}>
-                    <label style={{ display: 'block', fontSize: 13, color: '#6B7280', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase' }}>CNPJ</label>
-                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>{customerData?.costumer_cnpj}</p>
-                  </div>
-                  <div className="info-field" style={{ flex: 1 }}>
-                    <label style={{ display: 'block', fontSize: 13, color: '#6B7280', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase' }}>Endereço</label>
-                    <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>{customerAddress}</p>
-                  </div>
-                </div>
-                <div className="contacts-section" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-                  <div className="contacts-scroll" style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 4, margin: -4, padding: 4 }}>
-                    {[
-                      { name: customerData?.name, phone: customerData?.costumer_phone, email: customerData?.costumer_email }
-                    ].map((contact, index) => (
-                      <div className="contact-card" key={index} style={{ minWidth: 260, background: '#F9FAFB', padding: 16, borderRadius: 6 }}>
-                        <div className="name" style={{ fontSize: 14, fontWeight: 500, color: '#111827', marginBottom: 12 }}>{contact.name}</div>
-                        <div className="contact-info" style={{ fontSize: 14, color: '#6B7280' }}>
-                          <p style={{ marginBottom: 4 }}>{contact.phone}</p>
-                          <p style={{ marginBottom: 0 }}><a href={`mailto:${contact.email}`} style={{ color: '#2563EB', textDecoration: 'none' }}>{contact.email}</a></p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      )}
-
       <DashboardGrid>
         <div className="card">
           <h3>Prazo médio de Pagamento | Score</h3>
           <div className="card-content">
             <CardValue>
-              {scoreMetrics.currentScore} {formatVariationDisplay(scoreMetrics.scoreVariation, true)}
+              {scoreMetrics.currentScore > 0 ? scoreMetrics.currentScore : 0} {scoreMetrics.currentScore > 0 ? formatVariationDisplay(scoreMetrics.scoreVariation, true) : ''}
             </CardValue>
-            <CardSubtitle>Score atual</CardSubtitle>
+            <CardSubtitle>
+              {selectedCustomer ? 'Score atual' : 'Score médio de todos os clientes'}
+            </CardSubtitle>
             {loadingScore ? (
               <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 Carregando dados...
@@ -1161,8 +1253,8 @@ const BusinessAnalysis = () => {
                   />
                   <Tooltip 
                     formatter={(value, name) => {
-                      if (name === 'Score') return [`${value} pts`, name];
-                      return [`${value} dias`, name];
+                      if (name === 'Score') return value > 0 ? [`${value} pts`, name] : ['Sem dados', name];
+                      return value > 0 ? [`${value} dias`, name] : ['Sem dados', name];
                     }}
                   />
                   <Legend 
@@ -1210,13 +1302,15 @@ const BusinessAnalysis = () => {
         </div>
 
         <div className="card">
-          <h3>Faturamento | Score</h3>
+          <h3>Faturamento | Ocupação de Limite</h3>
           <div className="card-content">
             <CardValue>
-              {BillingService.formatCompactCurrency(billingMetrics.currentAverage)} 
-              {formatVariationDisplay(billingMetrics.variationPercentage)}
+              {SAPBillingService.formatCompactCurrency(billingMetrics.currentAverage)} 
+              {billingMetrics.currentAverage > 0 ? formatVariationDisplay(billingMetrics.variationPercentage) : ''}
             </CardValue>
-            <CardSubtitle>Faturamento médio dos últimos 3 meses</CardSubtitle>
+            <CardSubtitle>
+              {selectedCustomer ? 'Faturamento médio dos últimos 12 meses' : 'Faturamento médio de todos os clientes'}
+            </CardSubtitle>
             {loading ? (
               <div style={{ height: 180, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 Carregando dados...
@@ -1236,7 +1330,7 @@ const BusinessAnalysis = () => {
                     axisLine={false} 
                     tickLine={false} 
                     style={{ fontSize: '12px' }}
-                    tickFormatter={(value) => BillingService.formatCompactCurrency(value)}
+                    tickFormatter={(value) => SAPBillingService.formatCompactCurrency(value)}
                   />
                   <YAxis 
                     yAxisId="right"
@@ -1250,7 +1344,7 @@ const BusinessAnalysis = () => {
                   <Tooltip 
                     formatter={(value, name) => {
                       if (name === 'Ocupação de Limite') return [`${value.toFixed(1)}%`, name];
-                      return [BillingService.formatCurrency(value), name];
+                      return [SAPBillingService.formatCurrency(value), name];
                     }}
                     labelFormatter={(label) => `Mês: ${label}`}
                   />
@@ -1297,6 +1391,7 @@ const BusinessAnalysis = () => {
                     dot={{ r: 3 }} 
                     name="Ocupação de Limite" 
                     yAxisId="right" 
+                    connectNulls={false}
                   />
                 </ComposedChart>
               </ResponsiveContainer>
@@ -1307,112 +1402,129 @@ const BusinessAnalysis = () => {
         <div className="card">
           <h3>Resumo Risco Cliente</h3>
           <div className="card-content">
-            <div style={{ 
-              display: 'grid', 
-              gridTemplateColumns: 'repeat(2, 1fr)',
-              gap: '12px',
-              height: '240px',
-              overflowY: 'auto',
-              paddingRight: '8px'
-            }}>
-              <div>
-                <div style={{ fontSize: '18px', fontWeight: '600' }}>
-                  {RiskSummaryService.formatCompactCurrency(riskSummaryData.creditLimitGranted)}
+            {loadingRiskData ? (
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center', 
+                height: '240px',
+                color: 'var(--secondary-text)'
+              }}>
+                <div style={{ textAlign: 'center' }}>
+                  <div>Carregando dados...</div>
+                  <div style={{ fontSize: '12px', marginTop: '4px' }}>
+                    {selectedCustomer ? `Cliente selecionado` : `${customers.length} clientes`}
+                  </div>
                 </div>
-                <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  Limite de crédito concedido
-                </h4>  
               </div>
-              
-              <div>
-                <div style={{ fontSize: '18px', fontWeight: '600' }}>{riskSummaryData.creditLimitUsed}%</div>
-                <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  Limite de crédito utilizado
-                </h4>
-              </div>
-
-              <div>
-                <div style={{ fontSize: '18px', fontWeight: '600' }}>
-                  {RiskSummaryService.formatCompactCurrency(riskSummaryData.amountToReceive)}
+            ) : (
+              <div style={{ 
+                display: 'grid', 
+                gridTemplateColumns: 'repeat(2, 1fr)',
+                gap: '12px',
+                height: '240px',
+                overflowY: 'auto',
+                paddingRight: '8px'
+              }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>
+                    {SAPRiskService.formatCompactCurrency(riskSummaryData.creditLimitGranted)}
+                  </div>
+                  <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    Limite de crédito {selectedCustomer ? 'concedido' : 'total'}
+                  </h4>  
                 </div>
-                <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  A receber
-                </h4>
-              </div>
+                
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>{riskSummaryData.creditLimitUsed}%</div>
+                  <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    Limite de crédito utilizado
+                  </h4>
+                </div>
 
-              <div>
-                <div style={{ fontSize: '18px', fontWeight: '600' }}>{riskSummaryData.avgPaymentTerm} dias</div>
-                <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  Prazo médio de pagamento
-                </h4>
-              </div>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>
+                    {SAPRiskService.formatCompactCurrency(riskSummaryData.amountToReceive)}
+                  </div>
+                  <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    A receber {selectedCustomer ? '' : '(total)'}
+                  </h4>
+                </div>
 
-              <div>
-                <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  {riskSummaryData.isOverdue ? 'Vencido' : 'Em dia'}
-                </h4>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>{riskSummaryData.avgPaymentTerm} dias</div>
+                  <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    Prazo médio de pagamento
+                  </h4>
+                </div>
 
-                {riskSummaryData.isOverdue ? (
-                  <div style={{ 
-                    display: 'flex', 
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    fontSize: '18px', 
-                    fontWeight: '600', 
-                    gap: '2px'
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div>
+                  <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    {riskSummaryData.isOverdue ? 'Vencido' : 'Em dia'}
+                  </h4>
+
+                  {riskSummaryData.isOverdue ? (
+                    <div style={{ 
+                      display: 'flex', 
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      fontSize: '18px', 
+                      fontWeight: '600', 
+                      gap: '2px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <span style={{ 
+                          width: '6px', 
+                          height: '6px', 
+                          borderRadius: '50%', 
+                          background: 'var(--error)', 
+                          display: 'inline-block' 
+                        }} />
+                        {SAPRiskService.formatCompactCurrency(riskSummaryData.overdueAmount)}
+                      </div>
+                      
+                      <span style={{ 
+                        fontSize: '12px', 
+                        color: 'var(--error)', 
+                        fontWeight: 'normal', 
+                        paddingLeft: '14px'
+                      }}>
+                        Atraso atual: {riskSummaryData.maxCurrentDelayDays} dias
+                      </span>
+                    </div>
+                  ) : (
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px',
+                      fontSize: '18px', 
+                      fontWeight: '600'
+                    }}>
                       <span style={{ 
                         width: '6px', 
                         height: '6px', 
                         borderRadius: '50%', 
-                        background: 'var(--error)', 
+                        background: 'var(--success)', 
                         display: 'inline-block' 
                       }} />
-                      {RiskSummaryService.formatCompactCurrency(riskSummaryData.overdueAmount)}
+                      <span style={{ color: 'var(--success)' }}>Em dia</span>
                     </div>
-                    
-                    <span style={{ 
-                      fontSize: '12px', 
-                      color: 'var(--error)', 
-                      fontWeight: 'normal', 
-                      paddingLeft: '14px'
-                    }}>
-                      Atraso médio: {riskSummaryData.avgDelayDays} dias
-                    </span>
+                  )}
+                </div>
+                
+                <div>
+                  <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    Máx. dias em atraso
+                  </h4>
+                  <h4 style={{ fontSize: '10px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
+                    (12 meses)
+                  </h4>
+                  <div style={{ fontSize: '18px', fontWeight: '600' }}>
+                    {riskSummaryData.maxDelayDays12Months} dias
                   </div>
-                ) : (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '8px',
-                    fontSize: '18px', 
-                    fontWeight: '600'
-                  }}>
-                    <span style={{ 
-                      width: '6px', 
-                      height: '6px', 
-                      borderRadius: '50%', 
-                      background: 'var(--success)', 
-                      display: 'inline-block' 
-                    }} />
-                    <span style={{ color: 'var(--success)' }}>Em dia</span>
-                  </div>
-                )}
-              </div>
-              
-              <div>
-                <h4 style={{ fontSize: '12px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  Máx. dias em atraso
-                </h4>
-                <h4 style={{ fontSize: '10px', color: 'var(--secondary-text)', marginBottom: '2px' }}>
-                  (12 meses)
-                </h4>
-                <div style={{ fontSize: '18px', fontWeight: '600' }}>
-                  {riskSummaryData.maxDelayDays12Months} dias
                 </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       </DashboardGrid>
@@ -1433,6 +1545,63 @@ const BusinessAnalysis = () => {
 
       {selectedCustomer && (
         <>
+          <div className="customer-details" style={{
+            background: 'white',
+            border: '1px solid #E5E7EB',
+            borderRadius: 8,
+            padding: 24,
+            marginBottom: 24,
+            maxWidth: '100%'
+          }}>
+            <div className="header" style={{
+              marginBottom: 24,
+              borderBottom: '1px solid #E5E7EB',
+              paddingBottom: 16,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <h2 style={{ fontSize: 20, fontWeight: 600, color: '#111827', marginBottom: 0 }}>{customerData?.name}</h2>
+              <span style={{ cursor: 'pointer', display: 'flex', alignItems: 'center' }} onClick={() => setIsExpandedDetails(prev => !prev)}>
+                <svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ transform: isExpandedDetails ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>
+                  <path d="M5 8L10 13L15 8" stroke="#6B7280" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </span>
+            </div>
+            {isExpandedDetails && (
+              <>
+                <div style={{ fontSize: 14, color: '#6B7280', marginTop: 0, marginBottom: 0 }}>Código: {customerData?.company_code}</div>
+                <div className="content" style={{ display: 'flex', gap: 48, marginTop: 24 }}>
+                  <div className="company-info" style={{ display: 'flex', gap: 48, flex: 1 }}>
+                    <div className="info-field" style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: 13, color: '#6B7280', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase' }}>CNPJ</label>
+                      <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>{customerData?.costumer_cnpj}</p>
+                    </div>
+                    <div className="info-field" style={{ flex: 1 }}>
+                      <label style={{ display: 'block', fontSize: 13, color: '#6B7280', fontWeight: 500, marginBottom: 4, textTransform: 'uppercase' }}>Endereço</label>
+                      <p style={{ fontSize: 14, color: '#111827', lineHeight: 1.4 }}>{customerAddress}</p>
+                    </div>
+                  </div>
+                  <div className="contacts-section" style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
+                    <div className="contacts-scroll" style={{ display: 'flex', gap: 16, overflowX: 'auto', paddingBottom: 4, margin: -4, padding: 4 }}>
+                      {[
+                        { name: customerData?.name, phone: customerData?.costumer_phone, email: customerData?.costumer_email }
+                      ].map((contact, index) => (
+                        <div className="contact-card" key={index} style={{ minWidth: 260, background: '#F9FAFB', padding: 16, borderRadius: 6 }}>
+                          <div className="name" style={{ fontSize: 14, fontWeight: 500, color: '#111827', marginBottom: 12 }}>{contact.name}</div>
+                          <div className="contact-info" style={{ fontSize: 14, color: '#6B7280' }}>
+                            <p style={{ marginBottom: 4 }}>{contact.phone}</p>
+                            <p style={{ marginBottom: 0 }}><a href={`mailto:${contact.email}`} style={{ color: '#2563EB', textDecoration: 'none' }}>{contact.email}</a></p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+
           <div className="card" style={{ background: 'white', padding: '24px', borderRadius: '8px', marginBottom: '16px', border: '1px solid var(--border-color)' }}>
             <h3 style={{marginBottom: '30px'}}>Serasa Concentre PJ</h3>
             <DetailView>
@@ -1482,7 +1651,6 @@ const BusinessAnalysis = () => {
                 <div className="detail-section">
                   <h4>
                     Protestos
-                    <span className="occurrence-count">{mockDetailData.Protestos.TotalOcorrencias}</span>
                   </h4>
                   {mockDetailData.Protestos.ProtestosDetalhe.map((item, index) => (
                     <div key={index} className="occurrence-item">
@@ -1526,7 +1694,7 @@ const BusinessAnalysis = () => {
 
           <HistoryAnalysisContainer>
             <CustomerHistory>
-              <h4 style={{ marginBottom: '16px', color: 'black', fontWeight: '500'}}>Histórico de Workflow do cliente</h4>
+              <h4 style={{ marginBottom: '16px', color: 'black', fontWeight: '500'}}>Histórico</h4>
               
               {loadingWorkflowHistory ? (
                 <div style={{ 
@@ -1546,7 +1714,7 @@ const BusinessAnalysis = () => {
                   padding: '20px',
                   color: 'var(--secondary-text)'
                 }}>
-                  Nenhum histórico de workflow encontrado
+                  Nenhum histórico encontrado para este cliente
                 </div>
               ) : (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
@@ -1731,7 +1899,7 @@ const BusinessAnalysis = () => {
               <button 
                 className="load-calculated-limit"
                 onClick={handleLoadCalculatedLimit}
-                disabled={loadingCalculatedLimit || !selectedCustomer}
+                disabled={loadingCalculatedLimit || !selectedCustomer || !customerData?.company_code}
               >
                 {loadingCalculatedLimit ? (
                   <>
@@ -1765,6 +1933,7 @@ const BusinessAnalysis = () => {
                   />
                 </div>
               </div>
+              
               <div className="form-group">
                 <label htmlFor="prepaidLimit">Limite Pré-Pago</label>
                 <div className="prefix">
@@ -1809,7 +1978,7 @@ const BusinessAnalysis = () => {
                           {file.name}
                         </div>
                         <div className="file-actions">
-                          <button title="Baixar">
+                          <button title="Baixar" onClick={() => window.open(file.url, '_blank')}>
                             <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
                               <polyline points="7 10 12 15 17 10"></polyline>
@@ -1830,7 +1999,17 @@ const BusinessAnalysis = () => {
               </div>
               
               <div className="button-group">
-                <button className="secondary">Cancelar</button>
+                <button 
+                  className="secondary"
+                  onClick={() => {
+                    setCreditLimit('');
+                    setPrepaidLimit('');
+                    setComments('');
+                    setUploadedFiles([]);
+                  }}
+                >
+                  Cancelar
+                </button>
                 <button 
                   className="primary"
                   onClick={handleSaveAnalysis}
@@ -1850,11 +2029,21 @@ const BusinessAnalysis = () => {
             marginBottom: '24px'
           }}>
             <h3 style={{ marginBottom: '16px' }}>Pedidos do Cliente</h3>
-            <OrdersTable orders={salesOrders} />
+            {salesOrders.length === 0 ? (
+              <div style={{ 
+                textAlign: 'center', 
+                padding: '40px', 
+                color: 'var(--secondary-text)' 
+              }}>
+                Nenhum pedido encontrado para este cliente
+              </div>
+            ) : (
+              <OrdersTable orders={salesOrders} />
+            )}
           </div>
         </>
       )}
-      
+
       {showWorkflowModal && selectedWorkflowStep && (
         <div style={{
           position: 'fixed',

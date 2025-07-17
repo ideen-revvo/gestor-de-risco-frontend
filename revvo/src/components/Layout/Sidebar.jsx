@@ -251,7 +251,7 @@ const Sidebar = ({
           </li>
         </ul>
 
-        <ul>
+        {/* <ul>
           <li 
             className={currentPage === 'sap-sales-orders' ? 'active' : ''}
             onClick={() => {
@@ -272,7 +272,7 @@ const Sidebar = ({
             <CurrencyDollar size={16} />
             Faturas
           </li>
-        </ul>
+        </ul> */}
         
         <ul className="submenu" style={{ display: isConfigOpen ? 'block' : 'none' }}>
           <li 
