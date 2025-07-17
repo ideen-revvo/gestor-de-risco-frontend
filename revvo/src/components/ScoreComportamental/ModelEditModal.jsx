@@ -205,11 +205,20 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
     variables: [],
     finalScore: 0,
     ksScore: 0,
-    distributionData: []
+    distributionData: [],
+    target_nome: '',
+    target_operador: '>',
+    target_valor: ''
   });
 
   const [variables, setVariables] = useState(model?.variables || []);
   const [modelType, setModelType] = useState(model?.modelType || 'scorecard');
+  // Estado para variável target
+  const [target, setTarget] = useState({
+    nome: model?.target_nome || '',
+    operador: model?.target_operador || '>',
+    valor: model?.target_valor || ''
+  });
 
   const handleAddVariable = () => {
     const newVariable = modelType === 'scorecard' 
@@ -246,6 +255,10 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
     }));
   };
 
+  const handleTargetChange = (field, value) => {
+    setTarget(prev => ({ ...prev, [field]: value }));
+  };
+
   const handleModelTypeChange = (type) => {
     setModelType(type);
     setFormData(prev => ({ ...prev, modelType: type }));
@@ -264,18 +277,20 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
     let processedVariables = variables;
     let finalScore = 0;
-    
+    // Converter peso de % para decimal
+    processedVariables = variables.map(v => ({
+      ...v,
+      weight: v.weight > 1 ? v.weight / 100 : v.weight
+    }));
     if (modelType === 'scorecard') {
       // Normalize weights to sum to 1 for scorecard
-      const totalWeight = variables.reduce((sum, v) => sum + Math.abs(v.weight), 0);
-      processedVariables = variables.map(v => ({
+      const totalWeight = processedVariables.reduce((sum, v) => sum + Math.abs(v.weight), 0);
+      processedVariables = processedVariables.map(v => ({
         ...v,
         weight: totalWeight > 0 ? v.weight / totalWeight : 0
       }));
-      
       // Calculate final score for scorecard
       finalScore = processedVariables.reduce(
         (sum, v) => sum + v.weight * (v.score || 0),
@@ -283,23 +298,23 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
       );
     } else {
       // For Score Linear Ponderado, don't normalize weights and calculate differently
-      processedVariables = variables;
-      finalScore = variables.reduce((sum, v) => sum + v.weight, 0);
+      finalScore = processedVariables.reduce((sum, v) => sum + v.weight, 0);
     }
-
     // Create mock KS distribution data for new models
     const mockDistributionData = !model ? [
       { score: 300, goodCumulative: 0.1, badCumulative: 0.3 },
       { score: 500, goodCumulative: 0.5, badCumulative: 0.7 },
       { score: 800, goodCumulative: 1.0, badCumulative: 1.0 },
     ] : model.distributionData;
-
     onSave({
       ...formData,
       variables: processedVariables,
       finalScore,
       ksScore: model?.ksScore || 60.0,
-      distributionData: mockDistributionData
+      distributionData: mockDistributionData,
+      target_nome: target.nome,
+      target_operador: target.operador,
+      target_valor: target.valor
     });
     onClose();
   };
@@ -407,7 +422,42 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
               <h3 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: 'var(--primary-text)' }}>
                 Variáveis do Modelo
               </h3>
-              
+              {/* Novo container para variável target */}
+              <VariableCard>
+                <h2 style={{ fontSize: '16px', fontWeight: '600', marginBottom: '16px', color: 'var(--primary-text)' }}>Variável Target</h2>
+                <div className="variable-row" style={{ display: 'grid', gridTemplateColumns: '2fr 2fr', gap: 16, alignItems: 'end' }}>
+                  <FormGroup style={{ marginBottom: 0 }}>
+                    <label>Nome da Variável</label>
+                    <input type="text" placeholder="Nome da variável" style={{ padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
+                      value={target.nome}
+                      onChange={e => handleTargetChange('nome', e.target.value)}
+                    />
+                  </FormGroup>
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'end' }}>
+                    <FormGroup style={{ marginBottom: 0 }}>
+                      <label>Operador</label>
+                      <select style={{ padding: 0, borderRadius: 4, border: '1px solid #ccc', width: 70 }}
+                        value={target.operador}
+                        onChange={e => handleTargetChange('operador', e.target.value)}
+                      >
+                        <option value=">">&gt;</option>
+                        <option value=">=">&gt;=</option>
+                        <option value="=">=</option>
+                        <option value="<=">&lt;=</option>
+                        <option value="<">&lt;</option>
+                      </select>
+                    </FormGroup>
+                    <FormGroup style={{ marginBottom: 0, flex: 2 }}>
+                      <label>Valor</label>
+                      <input type="number" placeholder="Valor" style={{ padding: 8, borderRadius: 4, border: '1px solid #ccc', minWidth: 80 }}
+                        value={target.valor}
+                        onChange={e => handleTargetChange('valor', e.target.value)}
+                      />
+                    </FormGroup>
+                  </div>
+                </div>
+              </VariableCard>
+
               {variables.map((variable, index) => (
                 <VariableCard key={index}>
                   <div className="variable-row" style={{
@@ -431,8 +481,6 @@ export function ModelEditModal({ isOpen, onClose, model, onSave }) {
                         value={variable.weight}
                         onChange={(e) => handleVariableChange(index, 'weight', e.target.value)}
                         step="0.01"
-                        min={modelType === 'scorecard' ? "0" : undefined}
-                        max={modelType === 'scorecard' ? "1" : undefined}
                         required
                       />
                     </FormGroup>

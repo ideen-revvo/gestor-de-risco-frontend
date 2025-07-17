@@ -183,28 +183,6 @@ function App() {
     }
   }, [session, showPasswordModal]);
 
-  // Mock dos itens do pedido
-  const mockOrderItems = [
-    {
-      name: "Implante Mamário Ergonômico",
-      quantity: 2,
-      unitPrice: 16530.00,
-      total: 33060.00
-    },
-    {
-      name: "Expansor Tecidual Mamário",
-      quantity: 3,
-      unitPrice: 10500.00,
-      total: 31500.00
-    },
-    {
-      name: "Implante Mamário Anatômico",
-      quantity: 2,
-      unitPrice: 13500.00,
-      total: 27000.00
-    }
-  ];
-
   // Mock data for the detail view
   const mockDetailData = {
     SinteseCadastral: {
@@ -624,7 +602,6 @@ function App() {
               setSelectedDetailCard={setSelectedDetailCard}
               handleRowClick={handleRowClick}
               handleInstallmentClick={handleInstallmentClick}
-              mockOrderItems={mockOrderItems}
               mockDetailData={mockDetailData}
             />
           )}

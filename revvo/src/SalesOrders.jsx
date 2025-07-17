@@ -345,7 +345,6 @@ const OrderCard = styled.div`
     }
   }
 `
-
 const orders = [
   { id: '#1', partner: 'Clínica Estética Bella Vita', items: 5, total: 9700.00, status: 'pending' },
   { id: '#2', partner: 'Instituto de Cirurgia Plástica São Paulo', items: 10, total: 27000.00, status: 'approved' },
@@ -353,7 +352,7 @@ const orders = [
   { id: '#4', partner: 'Clínica Integrada de Cirurgia Plástica', items: 17, total: 47785.00, status: 'pending' },
   { id: '#5', partner: 'Hospital e Maternidade Santa Clara', items: 5, total: 7600.00, status: 'pending' },
   { id: '#6', partner: 'Clínica Dermatológica Pele & Arte', items: 14, total: 38000.00, status: 'pending' },
-]
+];
 
 function SalesOrders() {
   const [selectedOrder, setSelectedOrder] = useState(null)

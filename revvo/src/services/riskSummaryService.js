@@ -27,19 +27,6 @@ export const RiskSummaryService = {
     }
   },
 
-  getMockRiskData() {
-    return {
-      creditLimitGranted: 500000.00,
-      creditLimitUsed: 65,
-      amountToReceive: 175000.00,
-      avgPaymentTerm: 45,
-      isOverdue: true,
-      overdueAmount: 97000.00,
-      avgDelayDays: 15,
-      maxDelayDays12Months: 32
-    };
-  },
-
   async getCreditLimitFromSAP(customerId) {
     try {
       // Buscar dados do cliente no Supabase para obter o company_code
